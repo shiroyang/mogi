@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mogi — 真題 judge</title>
+<link rel="stylesheet" href="/mogi.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
+</head>
+<body>
+<header>
+  <div class="logo">mogi <span>模擬 — the 真題 judge</span></div>
+  <div class="spacer"></div>
+  <div class="stat" id="counts"></div>
+  <div class="stat" id="who"></div>
+  <a class="btn" href="/api/auth/logout">Sign out</a>
+</header>
+
+<div class="wrap">
+  <div class="heatmap" id="heatmap"></div>
+  <div class="filters">
+    <select id="fCorpus">
+      <option value="">All corpora</option>
+      <option>Amazon</option>
+      <option>Google</option>
+    </select>
+    <select id="fStatus">
+      <option value="">Any status</option>
+      <option value="solved">Solved</option>
+      <option value="attempted">Attempted</option>
+      <option value="fresh">Untouched</option>
+    </select>
+    <select id="fTier"><option value="">Any tier</option></select>
+    <input id="fSearch" placeholder="search title / id / family…">
+    <span class="stat" id="shown"></span>
+  </div>
+  <table class="problems">
+    <thead><tr><th></th><th>ID</th><th>Title</th><th>Corpus</th><th>Tier</th>
+      <th>Family</th><th>Checks</th><th>Attempts</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+
+<script src="/mogi.js"></script>
+<script>
+let ALL = [];
+
+function render() {
+  const c = fCorpus.value, s = fStatus.value, t = fTier.value,
+        q = fSearch.value.toLowerCase();
+  const rows = ALL.filter(p =>
+    (!c || p.corpus === c) &&
+    (!t || p.tier === t) &&
+    (!s || (s === "fresh" ? !p.status : p.status === s)) &&
+    (!q || (p.id + " " + p.title + " " + p.family).toLowerCase().includes(q)));
+  document.getElementById("rows").innerHTML = rows.map(p => `
+    <tr>
+      <td><span class="status-dot ${p.status}"></span></td>
+      <td class="mono">${esc(p.id)}</td>
+      <td><a href="/problem.html?id=${encodeURIComponent(p.id)}">${esc(p.title)}</a></td>
+      <td>${esc(p.corpus)}</td>
+      <td><span class="chip">${esc(p.tier || "—")}</span></td>
+      <td class="stat">${esc(p.family || "")}</td>
+      <td class="stat">${p.checks || ""}</td>
+      <td class="stat">${p.attempts || ""}</td>
+    </tr>`).join("");
+  shown.textContent = `${rows.length} shown`;
+}
+
+async function main() {
+  const me = await api("/me");
+  who.textContent = "@" + me.login;
+  const data = await api("/problems");
+  ALL = data.problems;
+  const byCorpus = {};
+  for (const p of ALL) {
+    byCorpus[p.corpus] = byCorpus[p.corpus] || { s: 0, n: 0 };
+    byCorpus[p.corpus].n++;
+    if (p.status === "solved") byCorpus[p.corpus].s++;
+  }
+  counts.innerHTML = `<b>${data.solved}</b> / ${data.total} solved · ` +
+    Object.entries(byCorpus).map(([k, v]) => `${k} ${v.s}/${v.n}`).join(" · ");
+  const tiers = [...new Set(ALL.map(p => p.tier).filter(Boolean))].sort();
+  fTier.innerHTML += tiers.map(t => `<option>${esc(t)}</option>`).join("");
+  for (const el of [fCorpus, fStatus, fTier]) el.onchange = render;
+  fSearch.oninput = render;
+  render();
+  api("/activity").then(a => renderHeatmap(document.getElementById("heatmap"), a.events))
+    .catch(() => {});
+}
+main().catch(e => { if (e.message !== "not signed in") document.body.textContent = e; });
+</script>
+</body>
+</html>

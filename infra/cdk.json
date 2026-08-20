@@ -1,0 +1,9 @@
+{
+  "app": ".venv/bin/python app.py",
+  "context": {
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
+    "@aws-cdk/core:enablePartitionLiterals": true
+  }
+}
