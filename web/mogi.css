@@ -70,6 +70,13 @@ table.problems tr:hover td { background: #161b2280; }
 .gutter:hover, .gutter.dragging { background: var(--accent); }
 body.resizing { user-select: none; cursor: col-resize; }
 body.resizing .pane { pointer-events: none; }
+
+.hgutter { cursor: row-resize; height: 6px; flex: none; border-radius: 3px;
+  background: var(--border); margin: 0 10px; }
+.hgutter:hover, .hgutter.dragging { background: var(--accent); }
+.results { flex: none; height: 220px; overflow: auto; }
+body.vresizing { user-select: none; cursor: row-resize; }
+body.vresizing .pane { pointer-events: none; }
 .pane { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   display: flex; flex-direction: column; overflow: hidden; }
 .pane .body { overflow: auto; padding: 14px 18px; }

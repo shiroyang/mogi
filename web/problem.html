@@ -51,8 +51,11 @@
       <div class="spacer" style="flex:1"></div>
       <span class="stat">draft autosaves locally</span>
     </div>
-    <div class="verdict" id="verdict" style="display:none"></div>
-    <div class="subs" id="subs"></div>
+    <div class="hgutter" id="hgutter" title="drag to resize · double-click to reset"></div>
+    <div class="results" id="results">
+      <div class="verdict" id="verdict" style="display:none"></div>
+      <div class="subs" id="subs"></div>
+    </div>
   </div>
 </div>
 
@@ -102,6 +105,32 @@ gutter.onmousedown = (e) => {
   document.addEventListener("mouseup", up);
 };
 gutter.ondblclick = () => { localStorage.removeItem(SPLIT_KEY); applySplit(0); };
+
+// horizontal divider: editor height vs the results box below it
+const resultsEl = document.getElementById("results");
+const HSPLIT_KEY = "mogi-results-px";
+function applyResultsH(px) { resultsEl.style.height = px ? `${px}px` : ""; }
+applyResultsH(+localStorage.getItem(HSPLIT_KEY) || 0);
+hgutter.onmousedown = (e) => {
+  e.preventDefault();
+  document.body.classList.add("vresizing");
+  hgutter.classList.add("dragging");
+  const pane = resultsEl.parentElement.getBoundingClientRect();
+  const move = (ev) => {
+    const px = Math.min(Math.max(pane.bottom - ev.clientY, 60), pane.height - 180);
+    applyResultsH(px);
+    localStorage.setItem(HSPLIT_KEY, px);
+  };
+  const up = () => {
+    document.body.classList.remove("vresizing");
+    hgutter.classList.remove("dragging");
+    document.removeEventListener("mousemove", move);
+    document.removeEventListener("mouseup", up);
+  };
+  document.addEventListener("mousemove", move);
+  document.addEventListener("mouseup", up);
+};
+hgutter.ondblclick = () => { localStorage.removeItem(HSPLIT_KEY); applyResultsH(0); };
 
 document.getElementById("leftTabs").onclick = (e) => {
   const tab = e.target.dataset.tab;
