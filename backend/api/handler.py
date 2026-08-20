@@ -342,6 +342,10 @@ def _poll(user: str, sess: dict, prob: str, sk: str) -> dict:
            ("sk", "verdict", "passed", "total", "ms", "detail", "stdout_tail",
             "trace", "mode", "created")}
     out["prob"] = prob
+    try:
+        out["cases"] = json.loads(item.get("cases_json") or "[]")
+    except ValueError:
+        out["cases"] = []
     if item.get("verdict") == "AC" and item.get("mode") == "submit":
         out["sync"] = _sync_if_needed(user, sess, prob, sk, item["code"], item)
     return out

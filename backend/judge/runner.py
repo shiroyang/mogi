@@ -29,6 +29,10 @@ from splitter import strip_main_guard
 
 COUNT_RE = re.compile(r"(\d+)/(\d+) checks passed")
 PASS_RE = re.compile(r"^PASS\b", re.M)
+# corpus PASS line variants: "PASS  label" and "PASS 12. label"
+PASS_LABEL_RE = re.compile(r"^PASS\s+(?:\d+\.\s*)?(.*)$", re.M)
+# the corpus check() helpers raise AssertionError(f"{label}: got {g!r} want {w!r}")
+GOTWANT_RE = re.compile(r"^(?:FAIL\s+)?(.*?):\s*got\s+(.+)\s+want\s+(.+)$", re.S)
 FRAME_RE = re.compile(r'File "[^"]*solution\.py", line (\d+)(?:, in (\S+))?')
 OUTPUT_CAP = 16_000  # chars kept from each stream; DDB items must stay small
 
@@ -111,8 +115,8 @@ def _assemble(user_code: str, harness: str, imports: str,
 
 
 def _annotate(stderr: str, sections: list[tuple[int, int, str]],
-              script: str) -> list[str]:
-    """Rewrite traceback frames as 'your code line N' / 'tests line N' with the
+              script: str) -> list[dict]:
+    """Traceback frames located as 'your code line N' / 'tests line N' with the
     offending source line attached."""
     def locate(n: int) -> tuple[str, int]:
         for a, b, label in sections:
@@ -126,9 +130,27 @@ def _annotate(stderr: str, sections: list[tuple[int, int, str]],
         n = int(m.group(1))
         label, local = locate(n)
         src = lines[n - 1].strip() if 0 < n <= len(lines) else ""
-        where = m.group(2) or "<module>"
-        frames.append(f"{label} line {local}, in {where}:  {src}")
+        frames.append({"seg": label, "line": local,
+                       "where": m.group(2) or "<module>", "src": src})
     return frames
+
+
+def _fmt_frames(frames: list[dict]) -> str:
+    return "\n".join(f"{f['seg']} line {f['line']}, in {f['where']}:  {f['src']}"
+                     for f in frames)
+
+
+def _split_output(stdout: str) -> tuple[list[dict], str]:
+    """PASS lines become structured passing cases; everything else (the user's
+    own prints, minus the final count line) is their stdout."""
+    cases, user_lines = [], []
+    for ln in stdout.splitlines():
+        m = PASS_LABEL_RE.match(ln)
+        if m:
+            cases.append({"status": "pass", "label": m.group(1).strip()[:160]})
+        elif not COUNT_RE.search(ln):
+            user_lines.append(ln)
+    return cases[:80], "\n".join(user_lines).strip()[:4000]
 
 
 def judge(user_code: str, harness: str, imports: str, *,
@@ -136,10 +158,12 @@ def judge(user_code: str, harness: str, imports: str, *,
           time_limit_s: int = 20, mem_mb: int = 640,
           python: str = sys.executable) -> dict:
     def result(verdict: str, passed: int, total, ms: int, detail: str,
-               stdout: str = "", stderr: str = "", trace: str = "") -> dict:
+               stdout: str = "", stderr: str = "", trace: str = "",
+               cases: list | None = None, user_stdout: str = "") -> dict:
         return {"verdict": verdict, "passed": passed, "total": total, "ms": ms,
                 "detail": detail[:600], "stdout": _tail(stdout),
-                "stderr": _tail(stderr), "trace": trace[:2400]}
+                "stderr": _tail(stderr), "trace": trace[:2400],
+                "cases": cases or [], "user_stdout": user_stdout}
 
     # CE first, on the submission alone — line numbers match the editor.
     try:
@@ -167,36 +191,59 @@ def judge(user_code: str, harness: str, imports: str, *,
             ms = int((time.monotonic() - t0) * 1000)
             out = e.stdout or b""
             out = out.decode("utf-8", "replace") if isinstance(out, bytes) else out
-            passed = len(PASS_RE.findall(out))
-            last = PASS_RE.findall(out) and out.strip().splitlines()[-1] or ""
-            return result("TLE", passed, None, ms,
+            cases, user_out = _split_output(out)
+            last = cases[-1]["label"] if cases else ""
+            return result("TLE", len(cases), None, ms,
                           f"no verdict within {time_limit_s}s"
-                          + (f" — last completed: {last}" if last else ""),
-                          stdout=out)
+                          + (f" — last completed check: {last}" if last else ""),
+                          stdout=out, cases=cases, user_stdout=user_out)
         ms = int((time.monotonic() - t0) * 1000)
 
     stdout, stderr = proc.stdout or "", proc.stderr or ""
-    passed = len(PASS_RE.findall(stdout))
+    cases, user_out = _split_output(stdout)
+    passed = len(cases)
     count = COUNT_RE.search(stdout)
     frames = _annotate(stderr, sections, script)
-    trace = "\n".join(frames[-8:])
-    loc = f" — {frames[-1]}" if frames else ""
+    trace = _fmt_frames(frames[-8:])
+    loc = ""
+    if frames:
+        f = frames[-1]
+        loc = f" — {f['seg']} line {f['line']}, in {f['where']}"
 
     if proc.returncode == 0 and count:
         n = int(count.group(2))
         return result("AC", int(count.group(1)), n, ms,
-                      f"{count.group(1)}/{n} checks passed", stdout=stdout)
+                      f"{count.group(1)}/{n} checks passed",
+                      stdout=stdout, cases=cases, user_stdout=user_out)
 
     if "AssertionError" in stderr:
         m = re.search(r"AssertionError:? ?(.*)$", stderr.strip(), re.M)
         msg = (m.group(1).strip() if m and m.group(1).strip()
                else "assertion failed")
+        # structure the failing case: label / got / want, plus the calling
+        # test line (which shows the actual input arguments)
+        fail: dict = {"status": "fail", "label": "", "got": "", "want": ""}
+        gw = GOTWANT_RE.match(msg)
+        if gw:
+            fail.update(label=gw.group(1).strip()[:160],
+                        got=gw.group(2).strip()[:2000],
+                        want=gw.group(3).strip()[:2000])
+        call = next((f for f in frames if f["where"] == "<module>"), None)
+        if call:
+            fail["call"] = call["src"][:600]
+        cases = cases + [fail]
         return result("WA", passed, None, ms, msg + loc,
-                      stdout=stdout, stderr=stderr, trace=trace)
+                      stdout=stdout, stderr=stderr, trace=trace,
+                      cases=cases, user_stdout=user_out)
 
     m = re.search(r"^(\w+(?:Error|Exception|Interrupt|Exit)):?.*$", stderr.strip(), re.M)
     detail = (m.group(0) if m
               else stderr.strip().splitlines()[-1] if stderr.strip()
               else "tests did not complete (no verdict line printed)")
+    call = next((f for f in frames if f["where"] == "<module>"), None)
+    if passed or call:
+        cases = cases + [{"status": "fail", "label": detail[:160],
+                          "call": (call or {}).get("src", "")[:600]}]
     return result("RE", passed, None, ms, detail + loc,
-                  stdout=stdout, stderr=stderr, trace=trace)
+                  stdout=stdout, stderr=stderr, trace=trace,
+                  cases=cases, user_stdout=user_out)

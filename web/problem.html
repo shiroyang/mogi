@@ -210,25 +210,72 @@ async function judge(mode) {
   }
 }
 
+const VERDICT_NAMES = { AC: "Accepted", WA: "Wrong Answer", RE: "Runtime Error",
+  TLE: "Time Limit Exceeded", CE: "Compile Error", PENDING: "Judging…" };
+
+function ioBox(label, content, cls = "") {
+  if (content == null || content === "") return "";
+  return `<div class="iolabel">${esc(label)}</div>` +
+         `<div class="iobox ${cls}">${esc(content)}</div>`;
+}
+
+function caseDetailHTML(c, s) {
+  if (!c) return "";
+  if (c.status === "pass")
+    return ioBox("Check", c.label) +
+           `<div class="iolabel" style="color:var(--green)">✓ passed</div>`;
+  let h = "";
+  h += ioBox("Input (the failing test call)", c.call || c.label);
+  h += ioBox("Stdout (your prints)", s.stdout_tail);
+  if (c.got !== undefined && c.got !== "") h += ioBox("Output", c.got, "bad");
+  if (c.want !== undefined && c.want !== "") h += ioBox("Expected", c.want, "good");
+  h += ioBox("Where it failed", s.trace);
+  return h;
+}
+
 function showVerdict(s, mode) {
   const v = document.getElementById("verdict");
   v.className = "verdict " + s.verdict;
-  let txt = `${s.verdict} — ${s.detail || ""}`;
-  txt += `\n(${s.ms} ms`;
-  if (s.passed != null)
-    txt += s.verdict === "AC"
-      ? ` · ${s.passed}${s.total ? "/" + s.total : ""} checks`
-      : ` · ${s.passed} check${s.passed === 1 ? "" : "s"} passed before failure`;
-  txt += ")";
-  if (s.trace) txt += "\n─── where it failed ───\n" + s.trace;
+  const cases = s.cases || [];
+  let meta = `Runtime: ${s.ms} ms`;
+  if (s.verdict === "AC") meta += ` · ${s.passed}${s.total ? "/" + s.total : ""} checks`;
+  else if (s.passed != null && s.verdict !== "CE")
+    meta += ` · ${s.passed} check${s.passed === 1 ? "" : "s"} passed before failure`;
+
+  let h = `<div class="vhead"><span class="vtitle v-${s.verdict}">` +
+          `${VERDICT_NAMES[s.verdict] || s.verdict}</span>` +
+          `<span class="stat">${esc(meta)}</span></div>`;
+  if (s.verdict !== "AC" && s.detail)
+    h += `<div class="stat" style="margin-bottom:8px">${esc(s.detail)}</div>`;
+  if (cases.length) {
+    h += `<div class="case-chips">` + cases.map((c, i) =>
+      `<button class="case-chip ${c.status}" data-ci="${i}">` +
+      `<span class="ic">${c.status === "pass" ? "✓" : "✕"}</span>Case ${i + 1}</button>`
+    ).join("") + `</div><div id="caseDetail"></div>`;
+  } else if (s.verdict === "CE") {
+    h += ioBox("Where", s.trace);
+  }
   if (s.sync && s.sync.state === "done")
-    txt += `\n↑ synced to GitHub: ${s.sync.path}`;
-  if (s.sync && s.sync.state === "error") txt += `\n⚠ GitHub sync failed: ${s.sync.why}`;
-  if (s.stdout_tail && s.verdict !== "AC")
-    txt += "\n─── test output ───\n" + s.stdout_tail;
-  v.textContent = txt;
+    h += `<div class="iolabel" style="color:var(--green)">↑ synced to GitHub: ${esc(s.sync.path)}</div>`;
+  if (s.sync && s.sync.state === "error")
+    h += `<div class="iolabel" style="color:var(--red)">⚠ GitHub sync failed: ${esc(s.sync.why)}</div>`;
+  v.innerHTML = h;
+
+  const detail = document.getElementById("caseDetail");
+  const select = (i) => {
+    for (const b of v.querySelectorAll(".case-chip"))
+      b.classList.toggle("active", +b.dataset.ci === i);
+    if (detail) detail.innerHTML = caseDetailHTML(cases[i], s);
+  };
+  for (const b of v.querySelectorAll(".case-chip"))
+    b.onclick = () => select(+b.dataset.ci);
+  if (cases.length) {
+    const firstFail = cases.findIndex(c => c.status === "fail");
+    select(firstFail >= 0 ? firstFail : cases.length - 1);
+  }
+
   if (mode === "submit" && s.verdict === "AC" && !P.solved)
-    setTimeout(() => location.reload(), 1200); // unlock analysis/reference tabs
+    setTimeout(() => location.reload(), 1600); // unlock analysis/reference tabs
   api("/problems/" + encodeURIComponent(PROB))
     .then(p => renderSubs(p.submissions)).catch(() => {});
 }

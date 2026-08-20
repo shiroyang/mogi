@@ -45,15 +45,22 @@ def lambda_handler(event, _ctx):
 
 
 def _finish(prob_id: str, sub_sk: str, r: dict):
+    import json
+    cases = r.get("cases", [])
+    cases_json = json.dumps(cases, ensure_ascii=False)
+    while len(cases_json) > 12_000 and cases:  # keep the failing tail
+        cases = cases[max(1, len(cases) // 2):]
+        cases_json = json.dumps(cases, ensure_ascii=False)
     ddb.update_item(
         Key={"pk": f"SUB#{prob_id}", "sk": sub_sk},
         UpdateExpression=("SET verdict=:v, passed=:p, #tot=:t, ms=:ms, detail=:d, "
-                          "stdout_tail=:o, #tr=:tr, judged_at=:ts"),
+                          "stdout_tail=:o, #tr=:tr, cases_json=:c, judged_at=:ts"),
         ExpressionAttributeNames={"#tot": "total", "#tr": "trace"},
         ExpressionAttributeValues={
             ":v": r["verdict"], ":p": r["passed"], ":t": r["total"] or 0,
-            ":ms": r["ms"], ":d": r["detail"][:1000], ":o": r["stdout"][-4000:],
-            ":tr": r.get("trace", ""), ":ts": int(time.time()),
+            ":ms": r["ms"], ":d": r["detail"][:1000],
+            ":o": r.get("user_stdout", "")[:4000],
+            ":tr": r.get("trace", ""), ":c": cases_json, ":ts": int(time.time()),
         },
     )
 
