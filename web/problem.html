@@ -40,6 +40,8 @@
     </div>
   </div>
 
+  <div class="gutter" id="gutter" title="drag to resize · double-click to reset"></div>
+
   <div class="pane">
     <div id="editor"></div>
     <div class="toolbar">
@@ -72,6 +74,34 @@ require(["vs/editor/editor.main"], () => {
     localStorage.setItem(DRAFT_KEY, editor.getValue()));
   main().catch(e => { if (e.message !== "not signed in") alert(e); });
 });
+
+// draggable divider between statement and editor; width persists per browser
+const splitEl = document.querySelector(".split");
+const SPLIT_KEY = "mogi-split-px";
+function applySplit(px) {
+  splitEl.style.gridTemplateColumns = px ? `${px}px 6px 1fr` : "";
+}
+applySplit(+localStorage.getItem(SPLIT_KEY) || 0);
+gutter.onmousedown = (e) => {
+  e.preventDefault();
+  document.body.classList.add("resizing");
+  gutter.classList.add("dragging");
+  const left = splitEl.getBoundingClientRect().left;
+  const move = (ev) => {
+    const px = Math.min(Math.max(ev.clientX - left, 300), innerWidth - 420);
+    applySplit(px);
+    localStorage.setItem(SPLIT_KEY, px);
+  };
+  const up = () => {
+    document.body.classList.remove("resizing");
+    gutter.classList.remove("dragging");
+    document.removeEventListener("mousemove", move);
+    document.removeEventListener("mouseup", up);
+  };
+  document.addEventListener("mousemove", move);
+  document.addEventListener("mouseup", up);
+};
+gutter.ondblclick = () => { localStorage.removeItem(SPLIT_KEY); applySplit(0); };
 
 document.getElementById("leftTabs").onclick = (e) => {
   const tab = e.target.dataset.tab;
@@ -122,6 +152,8 @@ async function main() {
   };
   unlockSpoilers(P);
   renderSubs(P.submissions);
+  // fresh problem, no local draft -> start from the stub instead of a blank editor
+  if (!editor.getValue().trim() && P.stub) editor.setValue(P.stub);
 }
 
 async function judge(mode) {

@@ -63,8 +63,13 @@ table.problems tr:hover td { background: #161b2280; }
 .heatmap .l3 { background: #26a641; } .heatmap .l4 { background: #39d353; }
 
 /* problem page */
-.split { display: grid; grid-template-columns: minmax(380px, 46%) 1fr; gap: 16px;
+.split { display: grid; grid-template-columns: minmax(340px, 46%) 6px 1fr; gap: 8px;
   height: calc(100vh - 58px); padding: 12px 16px; }
+.gutter { cursor: col-resize; width: 6px; border-radius: 3px; background: var(--border);
+  align-self: stretch; margin: 24px 0; }
+.gutter:hover, .gutter.dragging { background: var(--accent); }
+body.resizing { user-select: none; cursor: col-resize; }
+body.resizing .pane { pointer-events: none; }
 .pane { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
   display: flex; flex-direction: column; overflow: hidden; }
 .pane .body { overflow: auto; padding: 14px 18px; }
