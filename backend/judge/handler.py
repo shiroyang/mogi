@@ -34,6 +34,7 @@ def lambda_handler(event, _ctx):
 
     result = judge(
         code, meta["harness"], meta.get("imports", ""),
+        required=[str(r) for r in meta.get("required", [])],
         time_limit_s=int(meta.get("time_limit_s", 20)),
     )
     _finish(prob_id, sub_sk, result)
@@ -47,12 +48,12 @@ def _finish(prob_id: str, sub_sk: str, r: dict):
     ddb.update_item(
         Key={"pk": f"SUB#{prob_id}", "sk": sub_sk},
         UpdateExpression=("SET verdict=:v, passed=:p, #tot=:t, ms=:ms, detail=:d, "
-                          "stdout_tail=:o, judged_at=:ts"),
-        ExpressionAttributeNames={"#tot": "total"},
+                          "stdout_tail=:o, #tr=:tr, judged_at=:ts"),
+        ExpressionAttributeNames={"#tot": "total", "#tr": "trace"},
         ExpressionAttributeValues={
             ":v": r["verdict"], ":p": r["passed"], ":t": r["total"] or 0,
             ":ms": r["ms"], ":d": r["detail"][:1000], ":o": r["stdout"][-4000:],
-            ":ts": int(time.time()),
+            ":tr": r.get("trace", ""), ":ts": int(time.time()),
         },
     )
 

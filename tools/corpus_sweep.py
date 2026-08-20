@@ -36,7 +36,8 @@ def sweep(corpus_root: Path, only: list[str]) -> int:
             bad.append((stem, f"SPLIT: {e}"))
             print(f"  {i:3}/{len(files)} SPLIT-FAIL {stem}: {e}")
             continue
-        r = judge(s.reference, s.harness, s.imports, time_limit_s=30)
+        r = judge(s.reference, s.harness, s.imports,
+                  required=s.required, time_limit_s=30)
         if r["verdict"] != "AC":
             bad.append((stem, f"{r['verdict']}: {r['detail']}"))
             print(f"  {i:3}/{len(files)} {r['verdict']:3} {stem}: {r['detail'][:120]}")
@@ -63,12 +64,41 @@ def sabotage(corpus_root: Path) -> int:
     }
     fails = 0
     for want, code in cases.items():
-        r = judge(code, s.harness, s.imports, time_limit_s=4)
+        r = judge(code, s.harness, s.imports, required=s.required, time_limit_s=4)
         ok = r["verdict"] == want
         fails += 0 if ok else 1
         print(f"  sabotage {want}: got {r['verdict']} ({r['detail'][:90]}) "
               f"{'✓' if ok else '✗ MISMATCH'}")
-    return fails
+
+    # the RE case must locate the failure in the user's code
+    r = judge("x = 1\n", s.harness, s.imports, required=s.required, time_limit_s=4)
+    ok = "tests line" in (r.get("trace") or "")
+    fails += 0 if ok else 1
+    print(f"  trace annotation: {'✓' if ok else '✗ no located frames'} "
+          f"({(r.get('trace') or '')[:80]})")
+
+    # LeetCode-style adapter: wrap a function-only problem's reference inside
+    # class Solution (as staticmethods), delete the module-level names, expect AC.
+    for c in ("Amazon", "Google"):
+        for p in sorted((corpus_root / c / "solutions").glob("*.py")):
+            s2 = split_solution(p.read_text(encoding="utf-8"))
+            import ast as _ast
+            tree = _ast.parse(s2.reference)
+            defs = {n.name for n in tree.body if isinstance(n, _ast.FunctionDef)}
+            if s2.required and all(r_ in defs for r_ in s2.required):
+                wrapped = (s2.reference
+                           + "\nclass Solution:\n    pass\n"
+                           + "".join(f"Solution.{n} = staticmethod({n})\ndel {n}\n"
+                                     for n in s2.required))
+                r = judge(wrapped, s2.harness, s2.imports,
+                          required=s2.required, time_limit_s=30)
+                ok = r["verdict"] == "AC"
+                fails += 0 if ok else 1
+                print(f"  adapter (class Solution) on {p.stem.split('_')[0]}: "
+                      f"{r['verdict']} {'✓' if ok else '✗ ' + r['detail'][:80]}")
+                return fails
+    print("  adapter: ✗ no function-only problem found")
+    return fails + 1
 
 
 if __name__ == "__main__":

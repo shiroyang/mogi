@@ -285,7 +285,7 @@ def _problem(user: str, prob_id: str) -> dict:
         KeyConditionExpression="pk = :p",
         ExpressionAttributeValues={":p": f"SUB#{prob_id}"},
         ScanIndexForward=False, Limit=15,
-        ProjectionExpression="sk, verdict, passed, #tot, ms, #md, created",
+        ProjectionExpression="sk, verdict, passed, #tot, ms, #md, created, detail",
         ExpressionAttributeNames={"#tot": "total", "#md": "mode"},
     )["Items"]
     out = {
@@ -340,7 +340,7 @@ def _poll(user: str, sess: dict, prob: str, sk: str) -> dict:
         raise ApiError(404, "no such submission")
     out = {k: item.get(k) for k in
            ("sk", "verdict", "passed", "total", "ms", "detail", "stdout_tail",
-            "mode", "created")}
+            "trace", "mode", "created")}
     out["prob"] = prob
     if item.get("verdict") == "AC" and item.get("mode") == "submit":
         out["sync"] = _sync_if_needed(user, sess, prob, sk, item["code"], item)

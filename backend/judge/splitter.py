@@ -86,6 +86,21 @@ def _func_stub(node: ast.FunctionDef | ast.AsyncFunctionDef, indent: str = "") -
     return "\n".join(lines)
 
 
+def _method_stub(node: ast.FunctionDef) -> str:
+    """A reference top-level function re-emitted as a Solution method."""
+    args = ast.unparse(node.args)
+    sig = f"    def {node.name}(self{', ' + args if args else ''})"
+    if node.returns is not None:
+        sig += f" -> {ast.unparse(node.returns)}"
+    lines = [sig + ":"]
+    doc = ast.get_docstring(node)
+    if doc:
+        first = doc.strip().splitlines()[0]
+        lines.append(f'        """{first}"""')
+    lines.append("        ...")
+    return "\n".join(lines)
+
+
 def _class_stub(node: ast.ClassDef) -> str:
     bases = ", ".join(ast.unparse(b) for b in node.bases)
     lines = [f"class {node.name}({bases}):" if bases else f"class {node.name}:"]
@@ -130,7 +145,6 @@ def split_solution(source: str) -> Split:
     }
     required = sorted(used & top - local - builtin_names - import_names)
 
-    stubs: list[str] = []
     by_name: dict[str, ast.stmt] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -141,15 +155,66 @@ def split_solution(source: str) -> Split:
                     by_name[tgt.id] = node
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             by_name[node.target.id] = node
-    for name in required:
-        node = by_name.get(name)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            stubs.append(_func_stub(node))
-        elif isinstance(node, ast.ClassDef):
-            stubs.append(_class_stub(node))
-        else:
-            stubs.append(f"{name} = ...  # define this (see the tests for the expected shape)")
+
+    # A few corpus files define their test plumbing (check()/checks counter/
+    # raises()/fixture builders) at module level instead of inside the guard.
+    # That plumbing is harness, not exercise: relocate everything top-level from
+    # the first plumbing definition down to the guard into the harness, and drop
+    # it from the required API so the stub never asks the user to implement it.
+    plumb_roots = [n for n in required
+                   if n.lstrip("_").startswith(("check", "expect", "assert", "raise"))]
+    root_nodes = [by_name[n] for n in plumb_roots if n in by_name]
+    if root_nodes:
+        boundary = min(n.lineno for n in root_nodes)
+        moved_src, moved_names = [], set()
+        for node in tree.body:
+            if node is guard or node.lineno < boundary:
+                continue
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                 ast.ClassDef, ast.Assign, ast.AnnAssign)):
+                first = min([node.lineno] +
+                            [d.lineno for d in getattr(node, "decorator_list", [])])
+                moved_src.append("".join(lines[first - 1:node.end_lineno]))
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    moved_names.add(node.name)
+                else:
+                    for tgt in ast.walk(node):
+                        if isinstance(tgt, ast.Name) and isinstance(tgt.ctx, ast.Store):
+                            moved_names.add(tgt.id)
+        if moved_src:
+            harness = ("# -- test plumbing (relocated from module level) --\n"
+                       + "\n".join(moved_src) + "\n\n" + harness)
+            required = [r for r in required if r not in moved_names]
+            warnings.append(f"relocated test plumbing into harness: {sorted(moved_names)}")
+
+    # Stub style. If every required name is a plain function, emit a
+    # LeetCode-style `class Solution` with those functions as methods — the
+    # judge adapts it back to top-level names at run time. Problems whose API
+    # includes classes or constants get those directly (LeetCode does the same
+    # for design questions: you implement the named class).
+    nodes = [by_name.get(n) for n in required]
+    leetcode_style = bool(required) and all(
+        isinstance(n, ast.FunctionDef) and not n.decorator_list for n in nodes
+    )
+    stubs: list[str] = []
+    if leetcode_style:
+        stubs.append("# Implement inside class Solution — LeetCode style."
+                     "\n# (Plain top-level functions with the same names also work.)")
+        stubs.append("class Solution:")
+        for node in nodes:
+            stubs.append(_method_stub(node))
+            stubs.append("")
+    else:
+        stubs.append("# The tests instantiate/call these names directly — implement them as given.")
         stubs.append("")
+        for name, node in zip(required, nodes):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                stubs.append(_func_stub(node))
+            elif isinstance(node, ast.ClassDef):
+                stubs.append(_class_stub(node))
+            else:
+                stubs.append(f"{name} = ...  # define this (see the tests for the expected shape)")
+            stubs.append("")
     stub = "\n".join(stubs).rstrip() + ("\n" if stubs else "")
 
     return Split(reference=reference, harness=harness, imports=imports,
@@ -157,9 +222,11 @@ def split_solution(source: str) -> Split:
 
 
 def strip_main_guard(source: str) -> str:
-    """Remove the user's own __main__ block so their scratch tests don't collide
-    with the appended harness. Returns the source unchanged if it doesn't parse
-    (the judge will report the SyntaxError as CE)."""
+    """Neutralize the user's own __main__ block so their scratch tests don't
+    collide with the appended harness. Each removed line is replaced by a
+    comment so line numbers stay identical to what the user sees in the editor
+    (tracebacks are mapped back to editor lines). Returns the source unchanged
+    if it doesn't parse — the judge reports the SyntaxError as CE."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -168,6 +235,7 @@ def strip_main_guard(source: str) -> str:
     if not guards:
         return source
     lines = source.splitlines(keepends=True)
-    for guard in sorted(guards, key=lambda g: -g.lineno):
-        del lines[guard.lineno - 1:guard.end_lineno]
+    for guard in guards:
+        for i in range(guard.lineno - 1, guard.end_lineno):
+            lines[i] = "# [your __main__ block is not judged]\n"
     return "".join(lines)

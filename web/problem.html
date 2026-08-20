@@ -143,11 +143,13 @@ document.getElementById("leftTabs").onclick = (e) => {
 
 function renderSubs(subs) {
   document.getElementById("subs").innerHTML = (subs || []).map(s => `
-    <div><span class="v-${s.verdict}">${s.verdict}</span>
-      <span>${s.mode === "run" ? "run" : "submit"}</span>
-      <span>${s.passed ?? ""}${s.total ? "/" + s.total : ""}</span>
-      <span>${s.ms ?? ""} ms</span>
-      <span>${fmtDate(s.created)}</span></div>`).join("");
+    <div><span class="v-${s.verdict}" style="min-width:3.2em">${s.verdict}</span>
+      <span style="min-width:3.5em">${s.mode === "run" ? "run" : "submit"}</span>
+      <span style="min-width:3em">${s.passed ?? ""}${s.total ? "/" + s.total : ""}</span>
+      <span style="min-width:4.5em">${s.ms ?? ""} ms</span>
+      <span style="min-width:8.5em">${fmtDate(s.created)}</span>
+      <span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+        title="${esc(s.detail || "")}">${esc((s.detail || "").slice(0, 90))}</span></div>`).join("");
 }
 
 function unlockSpoilers(p) {
@@ -211,14 +213,19 @@ async function judge(mode) {
 function showVerdict(s, mode) {
   const v = document.getElementById("verdict");
   v.className = "verdict " + s.verdict;
-  let txt = `${s.verdict} — ${s.detail || ""}   (${s.ms} ms`;
-  if (s.passed != null) txt += ` · ${s.passed}${s.total ? "/" + s.total : ""} checks`;
+  let txt = `${s.verdict} — ${s.detail || ""}`;
+  txt += `\n(${s.ms} ms`;
+  if (s.passed != null)
+    txt += s.verdict === "AC"
+      ? ` · ${s.passed}${s.total ? "/" + s.total : ""} checks`
+      : ` · ${s.passed} check${s.passed === 1 ? "" : "s"} passed before failure`;
   txt += ")";
+  if (s.trace) txt += "\n─── where it failed ───\n" + s.trace;
   if (s.sync && s.sync.state === "done")
     txt += `\n↑ synced to GitHub: ${s.sync.path}`;
   if (s.sync && s.sync.state === "error") txt += `\n⚠ GitHub sync failed: ${s.sync.why}`;
   if (s.stdout_tail && s.verdict !== "AC")
-    txt += "\n─── output ───\n" + s.stdout_tail;
+    txt += "\n─── test output ───\n" + s.stdout_tail;
   v.textContent = txt;
   if (mode === "submit" && s.verdict === "AC" && !P.solved)
     setTimeout(() => location.reload(), 1200); // unlock analysis/reference tabs
