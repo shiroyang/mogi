@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
 
-export const DEFAULT_SITE = "https://d24vqc5jsqa7l8.cloudfront.net";
+export const DEFAULT_SITE = "https://mogi-judge.vercel.app";
 export const DEFAULT_WORKSPACE = "~/mogi";
 
 export interface FileConfig {

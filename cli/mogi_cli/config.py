@@ -14,7 +14,7 @@ import json
 import os
 from pathlib import Path
 
-DEFAULT_SITE = "https://d24vqc5jsqa7l8.cloudfront.net"
+DEFAULT_SITE = "https://mogi-judge.vercel.app"
 DEFAULT_WORKSPACE = "~/mogi"
 
 

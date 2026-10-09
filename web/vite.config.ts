@@ -15,7 +15,8 @@ function devToken(): string | undefined {
     return undefined;
   }
 }
-const SITE = process.env.MOGI_SITE || "https://d24vqc5jsqa7l8.cloudfront.net";
+// The API itself (what Vercel's /api rewrite points at) — one hop fewer than going through the site.
+const SITE = process.env.MOGI_SITE || "https://403weozu92.execute-api.eu-west-1.amazonaws.com";
 
 export default defineConfig({
   plugins: [react()],

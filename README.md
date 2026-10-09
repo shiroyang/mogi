@@ -95,7 +95,7 @@ is what makes it smooth where the previous CSS-filter version stuttered. Glass i
 
 ```bash
 cd web && npm ci
-npm run dev        # http://localhost:5173 — /api is proxied to the judge with the CLI's token
+npm run dev        # http://localhost:5173 — /api is proxied to the judge's API with the CLI's token
 npm test           # vitest: ranking, filters, grouping, copy
 npm run build      # → web/dist (deployed by the CDK stack below)
 ```
@@ -184,13 +184,16 @@ A CloudFront Function serves `index.html` for any extensionless path, so the SPA
 routes work on reload; the API behaviour is untouched (custom error responses would
 have rewritten its JSON errors too).
 
-**Hosting the UI elsewhere.** `web/vercel.json` makes the same build deployable on
-Vercel: `/api/*` is rewritten to the API Gateway URL (same-origin, so cookies keep
-working) and everything else falls back to `index.html`. Two one-time steps when
-switching front doors: set the SSM parameter `/mogi/site-origin` to the new origin
-(the OAuth redirect is built from it), and change the GitHub OAuth app's callback
-URL to `<new origin>/api/auth/callback`. A custom domain on CloudFront works the
-same way (ACM certificate in us-east-1 + alias), without the Vercel hop.
+**The front door is Vercel: https://mogi-judge.vercel.app.** `web/vercel.json`
+rewrites `/api/*` to the API Gateway URL (same-origin, so cookies keep working) and
+everything else falls back to `index.html`; Vercel forwards the original host, so
+the API builds the OAuth redirect for the Vercel origin by itself (the SSM parameter
+`/mogi/site-origin` can pin it if a front door ever doesn't). The GitHub OAuth app's
+callback URL is `https://mogi-judge.vercel.app/api/auth/callback`. Deploy the UI with
+`cd web && npx vercel deploy --prod` (or connect the GitHub repo in the Vercel
+dashboard with root directory `web` for deploys on push). The CloudFront
+distribution still serves the same build as a fallback, but only one origin can
+own the GitHub login at a time.
 
 Edit the constants at the top of `infra/app.py` first (account, region, GitHub
 login, sync repo). Every resource is tagged `auto-delete: no` and `project: mogi`.

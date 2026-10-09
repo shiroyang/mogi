@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ingest import collect, CORPORA  # noqa: E402
 
-JUDGE = "https://d24vqc5jsqa7l8.cloudfront.net"
+JUDGE = "https://mogi-judge.vercel.app"
 
 
 def with_meta_rows(statement: str, title: str, rows: list[tuple[str, str]]) -> str:
