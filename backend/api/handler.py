@@ -452,7 +452,15 @@ def _set_meta(user: str, pid: str, body: dict) -> dict:
                         ProjectionExpression="pk").get("Item"):
         raise ApiError(404, f"unknown problem {pid}")
     sets, removes, values = [], [], {}
-    names = {"#genre": "genre", "#priority": "priority", "#tags": "tags", "#meta_at": "meta_at"}
+    # DynamoDB rejects aliases that the expression doesn't use, so only alias
+    # the attributes this patch actually touches (a star click sends priority alone).
+    names = {"#meta_at": "meta_at"}
+    if "genre" in body:
+        names["#genre"] = "genre"
+    if "priority" in body:
+        names["#priority"] = "priority"
+    if "tags" in body:
+        names["#tags"] = "tags"
     if "genre" in body:
         genre = str(body.get("genre") or "").strip()[:60]
         if genre:
