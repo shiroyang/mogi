@@ -58,6 +58,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     cmd("mogi.setTags", (node?: ProblemNode | GroupNode) => setTags(targetOf(node))),
     cmd("mogi.openInBrowser", (node?: ProblemNode | GroupNode) => openInBrowser(targetOf(node))),
     cmd("mogi.openWorkspaceFolder", openWorkspaceFolder),
+    // vscode://shiroyang.mogi/open?pid=Amazon%2FA16 — the "Open in VS Code" links on the web UI
+    vscode.window.registerUriHandler({ handleUri: uri => void handleUri(uri) }),
   );
 
   await setContext("mogi.signedIn", !!config.token());
@@ -164,6 +166,29 @@ async function pickOne(): Promise<void> {
 }
 
 // ------------------------------------------------------------------ open
+async function handleUri(uri: vscode.Uri): Promise<void> {
+  try {
+    if (uri.path !== "/open") { void vscode.window.showWarningMessage(`mogi: unknown link ${uri.path}`); return; }
+    const q = new URLSearchParams(uri.query);
+    let pid = q.get("pid") || "";
+    const bare = q.get("id") || "";
+    if (!pid && bare) {
+      const hits = (await ensureRows()).filter(r => r.id.toLowerCase() === bare.toLowerCase());
+      if (hits.length !== 1) { await search(); return; }
+      pid = hits[0].pid;
+    }
+    if (!pid) { await search(); return; }
+    if (!config.token()) {
+      const pick = await vscode.window.showWarningMessage("mogi: sign in first to open problems from the web UI.", "Sign in with GitHub");
+      if (pick) await doLogin(); else return;
+    }
+    await openProblem(pid);
+  } catch (e) {
+    output.appendLine(`uri: ${(e as Error).message}`);
+    void vscode.window.showErrorMessage(`mogi: ${(e as Error).message}`);
+  }
+}
+
 async function openProblem(pid: string, opts: { openEditor?: boolean; reveal?: boolean } = {}): Promise<ProblemDetail> {
   const detail = await api.problem(pid);
   const { solution } = materialize(config.workspaceDir(), detail);

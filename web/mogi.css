@@ -47,11 +47,12 @@ button.link { background: none; border: none; color: var(--accent); cursor: poin
 button.link:hover { text-decoration: underline; }
 
 .filters { display: flex; gap: 10px; margin: 14px 0; flex-wrap: wrap; align-items: center; }
-.filters select, .filters input {
+.filters select, .filters input:not([type="checkbox"]) {
   background: var(--panel); color: var(--fg); border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 10px; font-size: .9rem;
 }
-.filters input { min-width: 240px; }
+.filters input:not([type="checkbox"]) { min-width: 240px; }
+.filters input[type="checkbox"] { margin: 0; accent-color: var(--accent); }
 .filters .spacer { flex: 1; }
 .toggle { color: var(--muted); font-size: .85rem; display: flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap; }
 
@@ -80,6 +81,9 @@ tr.group .stat { margin-left: 10px; }
 .chip.genre:hover { border-color: var(--accent); background: #1f6feb22; }
 .chip.rank { color: var(--yellow); border-color: #d2992266; margin-left: 6px; }
 .chip.tag { color: var(--purple); border-color: #bc8cff55; font-size: .7rem; }
+.chip.vsc { color: var(--muted); font-size: .68rem; margin-left: 6px; opacity: 0; transition: opacity .12s; }
+tr:hover .chip.vsc { opacity: 1; }
+.chip.vsc:hover { color: var(--accent); border-color: var(--accent); text-decoration: none; }
 .editbtn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: .9rem; padding: 0 4px; }
 .editbtn:hover { color: var(--fg); }
 

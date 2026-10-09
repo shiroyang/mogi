@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>mogi — 真題 judge</title>
-<link rel="stylesheet" href="/mogi.css">
+<link rel="stylesheet" href="/mogi.css?v={{v}}">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
 </head>
 <body>
@@ -63,10 +63,11 @@
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
-  <p class="stat foot">Solve from your editor too: <code>pip install -e cli</code> → <code>mogi login</code> · <code>mogi open A16</code> · <code>mogi run</code> — or install the VS Code extension. See the README.</p>
+  <p class="stat foot">Prefer your editor? The <b>VS Code</b> chip on a row opens that problem in VS Code (mogi extension), or from a terminal:
+    <code>mogi open A16</code> · <code>mogi run</code> · <code>mogi submit</code>. Everything stays in sync with this page.</p>
 </div>
 
-<script src="/mogi.js"></script>
+<script src="/mogi.js?v={{v}}"></script>
 <script>
 let ALL = [], GENRES = [];
 const STATE_KEY = "mogi-dash";
@@ -101,7 +102,8 @@ function rowHTML(p) {
   return `<tr data-pid="${esc(p.pid)}">
     <td><span class="status-dot ${p.status}"></span></td>
     <td class="mono">${esc(p.id)}</td>
-    <td><a href="${pidURL(p.pid)}">${esc(p.title)}</a> ${tagsHTML(p.tags)}</td>
+    <td><a href="${pidURL(p.pid)}">${esc(p.title)}</a> ${tagsHTML(p.tags)}
+        <a class="chip vsc" href="${vscodeURL(p.pid)}" title="Open in VS Code (needs the mogi extension)">VS Code</a></td>
     <td>${esc(p.corpus)}</td>
     <td><span class="chip">${esc(p.tier || "—")}</span></td>
     <td class="nowrap"><button class="chip genre" data-genre="${esc(p.genre)}" title="filter by this genre">${esc(p.genre || "—")}</button>

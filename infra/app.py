@@ -6,6 +6,9 @@ by the API Lambda; the API Lambda invokes the judge Lambda asynchronously; state
 lives in one DynamoDB table. Total idle cost ≈ pennies/month: nothing here is
 always-on compute.
 """
+import hashlib
+from pathlib import Path
+
 import aws_cdk as cdk
 from aws_cdk import (
     Duration, RemovalPolicy,
@@ -26,6 +29,17 @@ ACCOUNT = "711387111223"
 REGION = "eu-west-1"
 GITHUB_LOGIN = "shiroyang"
 SYNC_REPO = "shiroyang/oj-solutions"
+WEB = Path(__file__).resolve().parent.parent / "web"
+
+
+def asset_version() -> str:
+    """Short content hash of the JS/CSS. The HTML references them as
+    `/mogi.js?v=<hash>`, so a browser can never pair a new page with a script it
+    cached months ago (the bug behind "IMPORTANCE_HELP is not defined")."""
+    h = hashlib.sha256()
+    for f in sorted(WEB.glob("*.js")) + sorted(WEB.glob("*.css")):
+        h.update(f.read_bytes())
+    return h.hexdigest()[:10]
 
 
 class MogiStack(cdk.Stack):
@@ -55,9 +69,9 @@ class MogiStack(cdk.Stack):
             runtime=lam.Runtime.PYTHON_3_13,
             code=lam.Code.from_asset("../backend/judge"),
             handler="handler.lambda_handler",
-            # 1769 MB = one full vCPU: harnesses are CPU-bound (C27b's N=100k
-            # self-check runs ~30 s on a laptop). Per-problem time limits are
-            # capped at 100 s by the ingester, under this 120 s timeout.
+            # 1769 MB = one full vCPU: harnesses are CPU-bound (B17's brute-force
+            # oracle needs ~55 s here). Per-problem time limits are capped at
+            # 110 s by the ingester, under this 120 s timeout.
             memory_size=1769,
             timeout=Duration.seconds(120),
             environment={"TABLE": table.table_name},
@@ -140,12 +154,21 @@ class MogiStack(cdk.Stack):
             },
         )
 
+        # HTML is rendered at synth time with the asset hash substituted for
+        # {{v}}; everything is served `Cache-Control: no-cache` so browsers
+        # revalidate (ETag → 304) instead of trusting heuristic freshness.
+        version = asset_version()
+        html_sources = [
+            s3deploy.Source.data(p.name, p.read_text(encoding="utf-8").replace("{{v}}", version))
+            for p in sorted(WEB.glob("*.html"))
+        ]
         s3deploy.BucketDeployment(
             self, "DeploySite",
-            sources=[s3deploy.Source.asset("../web")],
+            sources=[s3deploy.Source.asset(str(WEB), exclude=["*.html"]), *html_sources],
             destination_bucket=site,
             distribution=dist,
             distribution_paths=["/*"],
+            cache_control=[s3deploy.CacheControl.no_cache()],
         )
 
         ssm.StringParameter(self, "AllowedLogin", parameter_name="/mogi/allowed-github-login",
@@ -158,6 +181,7 @@ class MogiStack(cdk.Stack):
                       value=f"https://{dist.distribution_domain_name}/api/auth/callback")
         cdk.CfnOutput(self, "TableName", value=table.table_name)
         cdk.CfnOutput(self, "JudgeFunction", value=judge_fn.function_name)
+        cdk.CfnOutput(self, "AssetVersion", value=version)
 
 
 app = cdk.App()

@@ -107,6 +107,16 @@ tests, **Alt+S** submits; the verdict renders LeetCode-style in the panel and th
 failing line gets a red squiggle in the editor. Right-click → priority ★ / genre /
 tags. **Alt+O** searches. See [`vscode/README.md`](vscode/README.md).
 
+The web UI stays the primary surface; VS Code is an option per problem. Every
+dashboard row has a **VS Code** chip and every problem page an **Open in VS Code**
+button — both are `vscode://shiroyang.mogi/open?pid=…` links handled by the
+extension's URI handler, which creates the local files and opens them. Progress,
+priority, genre and tags are the same data wherever you look.
+
+Web assets are deployed with `Cache-Control: no-cache` and the HTML references
+`/mogi.js?v=<content hash>`, so a browser can never pair a new page with a script
+it cached earlier.
+
 ## Solve from the terminal (any editor)
 
 ```bash

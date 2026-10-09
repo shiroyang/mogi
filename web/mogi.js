@@ -30,6 +30,8 @@ function fmtDate(tsSec) {
 // Problem ids are corpus-qualified: "Amazon/A16". Both halves are plain ASCII.
 function pidURL(pid) { return "/problem.html?id=" + encodeURIComponent(pid); }
 function apiPath(pid) { return "/problems/" + pid.split("/").map(encodeURIComponent).join("/"); }
+// Handled by the mogi VS Code extension's URI handler (vscode://<publisher>.<name>/open).
+function vscodeURL(pid) { return "vscode://shiroyang.mogi/open?pid=" + encodeURIComponent(pid); }
 
 // Your own ★ priority outranks the computed importance; ties break on the score.
 function rankScore(p) { return (p.priority || 0) * 1000 + (p.importance || 0); }

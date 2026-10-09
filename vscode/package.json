@@ -10,7 +10,7 @@
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Education", "Other"],
   "main": "./dist/extension.js",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": ["onStartupFinished", "onUri"],
   "contributes": {
     "viewsContainers": {
       "activitybar": [
