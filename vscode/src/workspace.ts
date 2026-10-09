@@ -52,21 +52,30 @@ export function dirForPid(ws: string, pid: string): string | undefined {
   return undefined;
 }
 
+/** The statement already opens with `# ID — title` and the corpus front-matter
+ * table; append our rows to that table instead of adding a second header. */
+export function withMetaRows(statement: string, title: string, rows: [string, string][]): string {
+  const lines = statement.trim().split("\n");
+  let firstSection = lines.findIndex(l => l.startsWith("## "));
+  if (firstSection < 0) firstSection = lines.length;
+  let last = -1;
+  for (let i = 0; i < firstSection; i++) if (lines[i].startsWith("| **")) last = i;
+  const extra = rows.map(([k, v]) => `| **${k}** | ${v} |`);
+  if (last < 0) return [`# ${title}`, "", "| | |", "|---|---|", ...extra, "", ...lines].join("\n");
+  return [...lines.slice(0, last + 1), ...extra, ...lines.slice(last + 1)].join("\n");
+}
+
 export function renderProblemMd(p: ProblemDetail): string {
-  const pr = p.practice || ({} as ProblemDetail["practice"]);
   const rows: [string, string][] = [
-    ["Corpus", `${p.corpus} · Tier ${p.tier}${p.round ? ` · ${p.round}` : ""}${p.published ? ` · published ${p.published}` : ""}`],
-    ["Genre", p.genre + (p.genre_corpus && p.genre_corpus !== p.genre ? ` (corpus: ${p.genre_corpus})` : "")],
-    ["Importance", `${p.importance || 0}/100${p.rank ? ` · shape rank #${p.rank}` : ""}${p.priority ? ` · priority ${"★".repeat(p.priority)}` : ""}`],
-    ["Seen", `${p.pubs || 1} publication(s) · ${p.family_n || 0} problems share the genre`],
-    ["Source", p.link || "—"],
+    ["Genre", p.genre + (p.genre_corpus && p.genre_corpus !== p.genre ? ` (corpus: ${p.genre_corpus})` : "") +
+      ` · ${p.family_n || 0} problems share it`],
+    ["Importance", `${p.importance || 0}/100${p.rank ? ` · shape rank #${p.rank}` : ""} · seen in ${p.pubs || 1} publication(s)` +
+      (p.priority ? ` · priority ${"★".repeat(p.priority)}` : "")],
   ];
-  if (pr.url) rows.push(["Practice", `[${pr.label || "judge"}](${pr.url}) ${"⭐".repeat(pr.stars || 0)}${pr.note ? ` — ${pr.note}` : ""}`]);
   if (p.tags?.length) rows.push(["Tags", p.tags.join(", ")]);
-  const table = "| | |\n|---|---|\n" + rows.map(([k, v]) => `| **${k}** | ${v} |`).join("\n");
   const required = (p.required || []).map(r => `\`${r}\``).join(" ") || "—";
   return [
-    `# ${p.id} — ${p.title}`, "", table, "", (p.statement || "").trim(), "",
+    withMetaRows(p.statement || "", `${p.id} — ${p.title}`, rows), "",
     "## Required API", "", `The tests call these top-level names: ${required}`, "",
     "Your own `if __name__ == \"__main__\":` block is stripped before judging, so scratch tests there are safe.", "",
     "```python", (p.stub || "").trimEnd(), "```", "", "---",

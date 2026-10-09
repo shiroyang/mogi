@@ -10,7 +10,7 @@
 </head>
 <body>
 <header>
-  <div class="logo"><a href="/">mogi</a> <span id="crumb"></span></div>
+  <div class="logo"><a href="/">mogi</a> <a class="crumb" href="/problems.html">› problems</a> <span id="crumb"></span></div>
   <div class="pmeta" id="pmeta"></div>
   <div class="spacer"></div>
   <a class="stat nextlink" id="nextLink" style="display:none" title="the most important unsolved problem — same genre first"></a>
@@ -230,10 +230,14 @@ async function main() {
     localStorage.removeItem(legacy);
   }
   editor.setValue(localStorage.getItem(DRAFT_KEY) || "");
-  editor.onDidChangeModelContent(() => localStorage.setItem(DRAFT_KEY, editor.getValue()));
+  // remember what this browser was working on, for the home page's Continue tile
+  const touch = () => P && localStorage.setItem("mogi-last",
+    JSON.stringify({ pid: PROB, id: P.id, title: P.title, genre: P.genre, ts: Date.now() }));
+  editor.onDidChangeModelContent(() => { localStorage.setItem(DRAFT_KEY, editor.getValue()); touch(); });
 
   P = await api(apiPath(PROB));
   GENRES = P.genres || [];
+  touch();
   vscodeBtn.href = vscodeURL(PROB);
   document.title = `mogi — ${P.id}`;
   crumb.textContent = ` › ${P.id} — ${P.title}`;

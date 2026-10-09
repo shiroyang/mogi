@@ -65,6 +65,24 @@ CLI ─────┴─ /api/* ──► HTTP API ──► api Lambda ──�
   one overwrite the other. Every route, URL and local directory now carries the
   corpus; a bare id still works wherever it is unambiguous (`mogi open A16`).
 
+## Home
+
+`/` is a single glass card on dark water (`web/index.html`, `home.css`, `home.js`):
+a one-sentence state of the campaign ("7 of 250 solved. Three-day streak.
+Specification/Filter is 2 problems from done."), then exactly three actions —
+**Continue** (the unsolved problem you touched most recently on any device, or the
+one this browser last had open if that is newer), **Next up** (highest-ranked
+unsolved), **All problems** (the table at `/problems.html`) — and the last 26 weeks
+as a quiet heatmap. Everything comes from one call, `GET /api/home`, which also
+returns the streak and the genre closest to completion. Runs now update `last_at`
+too, so "working on it" counts even before a submission.
+
+The water is CSS: blurred colour blobs drifting under an SMIL-animated
+`feTurbulence` displacement; the card is `backdrop-filter` glass with a gradient
+rim and specular sheen everywhere, and on Chromium a real edge refraction
+(`backdrop-filter: url(#glassRefract)` fed by a canvas-generated displacement map,
+the technique from archisvaze/liquid-glass). `prefers-reduced-motion` stills it.
+
 ## Genre, frequency, importance — and your own categorisation
 
 Every problem carries metadata derived at ingest from the corpus front matter and
@@ -175,6 +193,12 @@ uploading — if a problem's own reference can't get AC, nothing is written.
 the old bare-id rows); `tools/migrate_ids.py --apply` moves per-user progress and
 submission rows from bare ids to corpus-qualified ones.
 
+`tools/mirror_problems.py <corpus> --repo <owner>/<repo>` mirrors every question
+(statement, required API, stub, links — no spoilers) into the solutions repo as
+`<Corpus>/<slug>.md` next to the judge's `<Corpus>/<slug>.py`, and regenerates its
+README as an index sorted by importance with ✅ on accepted problems. The repo can
+be private: the judge's OAuth token carries the `repo` scope.
+
 ## Verification
 
 `tools/corpus_sweep.py` submits every reference implementation to the judge as if
@@ -188,9 +212,9 @@ workspace layout, id resolution, config); `cd vscode && npm run typecheck`.
 ```
 backend/judge/   splitter.py (ast split, stub generation) · runner.py (sandbox) · handler.py
 backend/api/     handler.py (routes, OAuth + Bearer, JWT, meta, GitHub sync — stdlib + boto3 only)
-web/             index.html (dashboard: sort/group/filter/categorise + heatmap) · problem.html (Monaco + verdicts) · css/js
+web/             index.html + home.css/js (glass home) · problems.html (table: sort/group/filter/categorise) · problem.html (Monaco + verdicts) · mogi.css/js
 cli/             mogi_cli/ (stdlib-only `mogi` command) · tests/
 vscode/          the VS Code extension (TypeScript, esbuild-bundled, no runtime deps)
 infra/           app.py (CDK, one stack)
-tools/           ingest.py · migrate_ids.py · corpus_sweep.py
+tools/           ingest.py · migrate_ids.py · mirror_problems.py · corpus_sweep.py
 ```

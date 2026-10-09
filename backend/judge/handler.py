@@ -41,6 +41,12 @@ def lambda_handler(event, _ctx):
 
     if mode == "submit":
         _update_progress(user, prob_id, sub_sk, result)
+    else:  # a run is still "working on it" — the home page's Continue tile keys off last_at
+        ddb.update_item(
+            Key={"pk": f"USER#{user}", "sk": f"PROG#{prob_id}"},
+            UpdateExpression="SET last_at=:now, last_run_verdict=:v",
+            ExpressionAttributeValues={":now": int(time.time()), ":v": result["verdict"]},
+        )
     return {"ok": True, "verdict": result["verdict"]}
 
 

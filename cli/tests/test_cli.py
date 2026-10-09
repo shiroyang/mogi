@@ -40,7 +40,11 @@ class FakeApi:
 
     def problem(self, pid):
         row = next(r for r in ROWS if r["pid"] == pid)
-        return {**row, "slug": f"{row['id']}_slug", "statement": "## 1. Statement\n\n> Do it.",
+        statement = (f"# {row['id']} — {row['title']}\n\n| | |\n|---|---|\n"
+                     "| **Source** | https://example.com/p |\n"
+                     "| **Practice** | ⭐⭐ same core — [LC 1 X](https://leetcode.com/problems/x/) |\n\n"
+                     "---\n\n## 1. Statement (as published)\n\n> Do it.")
+        return {**row, "slug": f"{row['id']}_slug", "statement": statement,
                 "required": ["solve"], "stub": "class Solution:\n    def solve(self):\n        ...",
                 "link": "https://example.com/p", "practice": {"stars": 2, "url": "https://leetcode.com/problems/x/",
                                                              "label": "LC 1 X", "note": "same core"}}
@@ -117,9 +121,15 @@ class WorkspaceTests(unittest.TestCase):
             self.assertTrue((d / "solution.py").exists())
             self.assertIn("class Solution", (d / "solution.py").read_text())
             md = (d / "problem.md").read_text()
-            self.assertIn("# A16 — Design a Product Search System", md)
+            self.assertEqual(md.count("# A16 — Design a Product Search System"), 1)  # no duplicate header
             self.assertIn("`solve`", md)
-            self.assertIn("LC 1 X", md)
+            self.assertIn("LC 1 X", md)                      # the corpus table survives…
+            self.assertIn("| **Genre** | Specification/Filter", md)  # …with our rows appended to it
+            self.assertLess(md.index("| **Practice**"), md.index("| **Genre**"))
+            self.assertLess(md.index("| **Genre**"), md.index("## 1. Statement"))
+            # a statement without a table gets a synthesised header
+            bare = workspace.render_problem_md({**detail, "statement": "## 1. Statement\n\n> Do it."})
+            self.assertTrue(bare.startswith("# A16 — Design a Product Search System\n\n| | |"))
             # solution.py survives a re-open; marker resolves from a nested path
             (d / "solution.py").write_text("x = 1\n")
             workspace.materialize(ws, detail)

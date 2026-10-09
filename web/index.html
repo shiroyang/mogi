@@ -3,226 +3,45 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>mogi — 真題 judge</title>
-<link rel="stylesheet" href="/mogi.css?v={{v}}">
+<meta name="color-scheme" content="dark">
+<title>mogi</title>
+<link rel="stylesheet" href="/home.css?v={{v}}">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
 </head>
 <body>
-<header>
-  <div class="logo">mogi <span>模擬 — the 真題 judge</span></div>
-  <div class="spacer"></div>
-  <div class="stat" id="counts"></div>
-  <div class="stat" id="who"></div>
-  <a class="btn" href="/api/auth/logout">Sign out</a>
-</header>
-
-<div class="wrap">
-  <div class="heatmap" id="heatmap"></div>
-  <div class="filters">
-    <select id="fCorpus">
-      <option value="">All corpora</option>
-      <option>Amazon</option>
-      <option>Google</option>
-    </select>
-    <select id="fStatus">
-      <option value="">Any status</option>
-      <option value="solved">Solved</option>
-      <option value="attempted">Attempted</option>
-      <option value="fresh">Untouched</option>
-    </select>
-    <select id="fTier"><option value="">Any tier</option></select>
-    <select id="fGenre"><option value="">Any genre</option></select>
-    <input id="fSearch" placeholder="search title / id / genre / tag…">
-    <span class="spacer"></span>
-    <label class="toggle" title="one section per genre, collapsible"><input type="checkbox" id="fGroup"> group by genre</label>
-    <select id="fSort" title="sort order — or click a column header">
-      <option value="importance">Sort: importance</option>
-      <option value="frequency">Sort: frequency</option>
-      <option value="genre">Sort: genre</option>
-      <option value="tier">Sort: tier</option>
-      <option value="recent">Sort: recently worked</option>
-      <option value="attempts">Sort: attempts</option>
-      <option value="id">Sort: id</option>
-    </select>
-    <button class="btn" id="pickBtn" title="open the most important unsolved problem within the current filter">▶ Pick one</button>
-    <span class="stat" id="shown"></span>
-  </div>
-  <table class="problems">
-    <thead><tr>
-      <th></th>
-      <th data-sort="id">ID</th>
-      <th>Title</th>
-      <th>Corpus</th>
-      <th data-sort="tier">Tier</th>
-      <th data-sort="genre">Genre</th>
-      <th data-sort="frequency" title="publications × · problems sharing the genre in the corpus">Freq</th>
-      <th data-sort="importance" id="impHead">Importance</th>
-      <th title="your priority — click stars in a row to set">★ Priority</th>
-      <th>Checks</th>
-      <th data-sort="attempts">Attempts</th>
-    </tr></thead>
-    <tbody id="rows"></tbody>
-  </table>
-  <p class="stat foot">Prefer your editor? The <b>VS Code</b> chip on a row opens that problem in VS Code (mogi extension), or from a terminal:
-    <code>mogi open A16</code> · <code>mogi run</code> · <code>mogi submit</code>. Everything stays in sync with this page.</p>
+<!-- the water: slow drifting colour under a turbulence-displaced surface -->
+<div class="water" aria-hidden="true">
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="blob b4"></div>
+  <div class="blob b5"></div>
 </div>
+<svg class="defs" width="0" height="0" aria-hidden="true" focusable="false">
+  <filter id="ripple" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+    <feTurbulence type="fractalNoise" baseFrequency="0.0045 0.0075" numOctaves="2" seed="7" result="noise">
+      <animate attributeName="baseFrequency" dur="46s" values="0.0045 0.0075;0.0075 0.0045;0.0045 0.0075" repeatCount="indefinite"/>
+    </feTurbulence>
+    <feDisplacementMap in="SourceGraphic" in2="noise" scale="110" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+  <!-- filled in by home.js where backdrop-filter: url() is supported -->
+  <filter id="glassRefract" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"></filter>
+</svg>
+
+<main class="stage">
+  <section class="glass card" id="card" aria-busy="true">
+    <div class="etch" aria-hidden="true">模擬</div>
+    <header class="top">
+      <a class="wordmark" href="/">mogi</a>
+      <span class="who" id="who"></span>
+    </header>
+    <div class="content" id="content">
+      <h1 class="headline">Loading your judge…</h1>
+    </div>
+  </section>
+</main>
 
 <script src="/mogi.js?v={{v}}"></script>
-<script>
-let ALL = [], GENRES = [];
-const STATE_KEY = "mogi-dash";
-const S = Object.assign(
-  { corpus: "", status: "", tier: "", genre: "", q: "", sort: "importance", group: false, collapsed: [] },
-  JSON.parse(localStorage.getItem(STATE_KEY) || "{}"));
-const saveState = () => localStorage.setItem(STATE_KEY, JSON.stringify(S));
-
-const SORTS = {
-  importance: (a, b) => rankScore(b) - rankScore(a) || a.pid.localeCompare(b.pid),
-  frequency: (a, b) => (b.pubs || 0) - (a.pubs || 0) || (b.family_n || 0) - (a.family_n || 0) ||
-                       rankScore(b) - rankScore(a),
-  genre: (a, b) => (a.genre || "").localeCompare(b.genre || "") || rankScore(b) - rankScore(a),
-  tier: (a, b) => (a.tier || "").localeCompare(b.tier || "") || rankScore(b) - rankScore(a),
-  recent: (a, b) => (b.last_at || 0) - (a.last_at || 0) || rankScore(b) - rankScore(a),
-  attempts: (a, b) => (b.attempts || 0) - (a.attempts || 0) || rankScore(b) - rankScore(a),
-  id: (a, b) => a.pid.localeCompare(b.pid),
-};
-
-function filtered() {
-  const q = S.q.toLowerCase();
-  return ALL.filter(p =>
-    (!S.corpus || p.corpus === S.corpus) &&
-    (!S.tier || p.tier === S.tier) &&
-    (!S.genre || p.genre === S.genre) &&
-    (!S.status || (S.status === "fresh" ? !p.status : p.status === S.status)) &&
-    (!q || `${p.id} ${p.title} ${p.genre} ${(p.tags || []).join(" ")}`.toLowerCase().includes(q)))
-    .sort(SORTS[S.sort] || SORTS.importance);
-}
-
-function rowHTML(p) {
-  return `<tr data-pid="${esc(p.pid)}">
-    <td><span class="status-dot ${p.status}"></span></td>
-    <td class="mono">${esc(p.id)}</td>
-    <td><a href="${pidURL(p.pid)}">${esc(p.title)}</a> ${tagsHTML(p.tags)}
-        <a class="chip vsc" href="${vscodeURL(p.pid)}" title="Open in VS Code (needs the mogi extension)">VS Code</a></td>
-    <td>${esc(p.corpus)}</td>
-    <td><span class="chip">${esc(p.tier || "—")}</span></td>
-    <td class="nowrap"><button class="chip genre" data-genre="${esc(p.genre)}" title="filter by this genre">${esc(p.genre || "—")}</button>
-        <button class="editbtn" title="categorise: genre · priority · tags">✎</button></td>
-    <td>${freqHTML(p)}</td>
-    <td class="nowrap">${impHTML(p)}</td>
-    <td class="starcell">${starsHTML(p.priority || 0)}</td>
-    <td class="stat">${p.checks || ""}</td>
-    <td class="stat">${p.attempts || ""}</td>
-  </tr>`;
-}
-
-function render() {
-  const rows = filtered();
-  let html = "";
-  if (S.group) {
-    const groups = new Map();
-    for (const p of rows) {
-      const g = p.genre || "—";
-      if (!groups.has(g)) groups.set(g, []);
-      groups.get(g).push(p);
-    }
-    for (const [g, ps] of groups) {
-      const solved = ps.filter(p => p.status === "solved").length;
-      const collapsed = S.collapsed.includes(g);
-      html += `<tr class="group" data-genre="${esc(g)}"><td colspan="11">
-        <span class="caret">${collapsed ? "▸" : "▾"}</span> <b>${esc(g)}</b>
-        <span class="stat">${solved}/${ps.length} solved · top importance ${Math.max(...ps.map(p => p.importance || 0))}</span>
-      </td></tr>`;
-      if (!collapsed) html += ps.map(rowHTML).join("");
-    }
-  } else {
-    html = rows.map(rowHTML).join("");
-  }
-  document.getElementById("rows").innerHTML = html;
-  shown.textContent = `${rows.length} shown`;
-  for (const th of document.querySelectorAll("th[data-sort]"))
-    th.classList.toggle("active", th.dataset.sort === S.sort);
-}
-
-function applyMeta(p, res) {
-  Object.assign(p, { genre: res.genre, genre_corpus: res.genre_corpus,
-                     priority: res.priority, tags: res.tags });
-  GENRES = [...new Set(ALL.map(x => x.genre).filter(Boolean))]
-    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-  fillGenres();
-  render();
-}
-
-function fillGenres() {
-  fGenre.innerHTML = `<option value="">Any genre</option>` +
-    GENRES.map(g => `<option ${g === S.genre ? "selected" : ""}>${esc(g)}</option>`).join("");
-  if (S.genre && !GENRES.includes(S.genre)) { S.genre = ""; saveState(); }
-}
-
-document.getElementById("rows").onclick = async (e) => {
-  const tr = e.target.closest("tr");
-  if (!tr) return;
-  if (tr.classList.contains("group")) {
-    const i = S.collapsed.indexOf(tr.dataset.genre);
-    if (i >= 0) S.collapsed.splice(i, 1); else S.collapsed.push(tr.dataset.genre);
-    saveState(); render(); return;
-  }
-  const p = ALL.find(x => x.pid === tr.dataset.pid);
-  if (!p) return;
-  if (e.target.classList.contains("genre")) {
-    S.genre = e.target.dataset.genre; fGenre.value = S.genre; saveState(); render(); return;
-  }
-  if (e.target.classList.contains("editbtn")) {
-    openMetaEditor(e.target, p, GENRES, res => applyMeta(p, res)); return;
-  }
-  if (e.target.classList.contains("star")) {
-    const k = +e.target.dataset.star;
-    try { applyMeta(p, await saveMeta(p.pid, { priority: k === (p.priority || 0) ? 0 : k })); }
-    catch (err) { alert(err.message); }
-  }
-};
-
-async function main() {
-  const me = await api("/me");
-  who.textContent = "@" + me.login;
-  const data = await api("/problems");
-  ALL = data.problems;
-  GENRES = data.genres || [];
-  const byCorpus = {};
-  for (const p of ALL) {
-    byCorpus[p.corpus] = byCorpus[p.corpus] || { s: 0, n: 0 };
-    byCorpus[p.corpus].n++;
-    if (p.status === "solved") byCorpus[p.corpus].s++;
-  }
-  counts.innerHTML = `<b>${data.solved}</b> / ${data.total} solved · ` +
-    Object.entries(byCorpus).map(([k, v]) => `${k} ${v.s}/${v.n}`).join(" · ");
-  const tiers = [...new Set(ALL.map(p => p.tier).filter(Boolean))].sort();
-  fTier.innerHTML = `<option value="">Any tier</option>` +
-    tiers.map(t => `<option ${t === S.tier ? "selected" : ""}>${esc(t)}</option>`).join("");
-  fillGenres();
-  fCorpus.value = S.corpus; fStatus.value = S.status; fSearch.value = S.q;
-  fSort.value = S.sort; fGroup.checked = S.group;
-  impHead.title = IMPORTANCE_HELP;
-
-  fCorpus.onchange = () => { S.corpus = fCorpus.value; saveState(); render(); };
-  fStatus.onchange = () => { S.status = fStatus.value; saveState(); render(); };
-  fTier.onchange = () => { S.tier = fTier.value; saveState(); render(); };
-  fGenre.onchange = () => { S.genre = fGenre.value; saveState(); render(); };
-  fSort.onchange = () => { S.sort = fSort.value; saveState(); render(); };
-  fGroup.onchange = () => { S.group = fGroup.checked; saveState(); render(); };
-  fSearch.oninput = () => { S.q = fSearch.value; saveState(); render(); };
-  for (const th of document.querySelectorAll("th[data-sort]"))
-    th.onclick = () => { S.sort = th.dataset.sort; fSort.value = S.sort; saveState(); render(); };
-  pickBtn.onclick = () => {
-    const c = filtered().filter(p => p.status !== "solved").sort(SORTS.importance);
-    if (c.length) location.href = pidURL(c[0].pid);
-    else alert("Everything in this filter is solved 🎉");
-  };
-  render();
-  api("/activity").then(a => renderHeatmap(document.getElementById("heatmap"), a.events))
-    .catch(() => {});
-}
-main().catch(e => { if (e.message !== "not signed in") document.body.textContent = e; });
-</script>
+<script src="/home.js?v={{v}}"></script>
 </body>
 </html>

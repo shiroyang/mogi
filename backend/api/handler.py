@@ -17,6 +17,7 @@ Stdlib + boto3 only, deliberately: the deploy artifact is the bare directory.
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import hashlib
 import hmac
 import json
@@ -245,6 +246,9 @@ def _route(event, method: str, path: str) -> dict:
             "login": user, "cli": bool(sess.get("cli")),
             "can_sync": bool(sess.get("gh") or _param("sync-pat", required=False)),
         })
+    if path == "/home":
+        hint = (event.get("queryStringParameters") or {}).get("hint", "")
+        return _resp(200, _home(user, hint))
     if parts[:1] == ["problems"]:
         if len(parts) == 1 and method == "GET":
             return _resp(200, _problems(user))
@@ -586,6 +590,62 @@ def _sync_if_needed(user: str, sess: dict, pid: str, sk: str,
     )
     return {"state": "done", "path": path,
             "url": put.get("content", {}).get("html_url", "")}
+
+
+# ---------------------------------------------------------------- home
+def _slim(r: dict | None) -> dict | None:
+    if not r:
+        return None
+    return {k: r.get(k) for k in ("pid", "id", "title", "genre", "importance", "priority",
+                                  "status", "attempts", "last_at", "tier", "corpus")}
+
+
+def _home(user: str, hint: str = "") -> dict:
+    """Everything the home page needs in one call: where you left off, what to do
+    next, and the state of the campaign. `hint` is the pid the browser last had
+    open (a local draft the server can't see); its row is returned so the page can
+    prefer it over the server-side `last`."""
+    listing = _problems(user)
+    rows = listing["problems"]
+    unsolved = [r for r in rows if r["status"] != "solved"]
+    worked = [r for r in unsolved if r.get("last_at")]
+    last = max(worked, key=lambda r: r["last_at"]) if worked else None
+    pool = sorted((r for r in unsolved if not last or r["pid"] != last["pid"]),
+                  key=lambda r: (-_rank_score(r), r["pid"]))
+    nxt = pool[0] if pool else None
+    next2 = pool[1] if len(pool) > 1 else None
+    hint_row = next((r for r in rows if r["pid"] == hint), None) if hint else None
+
+    events = _activity(user)["events"]
+    ac_days = sorted({dt.datetime.fromtimestamp(e["ts"] / 1000, dt.timezone.utc).date().isoformat()
+                      for e in events if e.get("verdict") == "AC" and e.get("mode") == "submit"},
+                     reverse=True)
+    today = dt.datetime.now(dt.timezone.utc).date()
+    streak, cursor = 0, today
+    day_set = set(ac_days)
+    if cursor.isoformat() not in day_set:  # a streak may still be alive from yesterday
+        cursor -= dt.timedelta(days=1)
+    while cursor.isoformat() in day_set:
+        streak += 1
+        cursor -= dt.timedelta(days=1)
+
+    by_genre: dict[str, dict] = {}
+    for r in rows:
+        g = by_genre.setdefault(r["genre"] or "—", {"genre": r["genre"] or "—", "solved": 0, "left": 0, "top": 0})
+        g["solved" if r["status"] == "solved" else "left"] += 1
+        g["top"] = max(g["top"], int(r.get("importance") or 0))
+    started = [g for g in by_genre.values() if g["solved"] and g["left"]]
+    near = min(started, key=lambda g: (g["left"], -g["top"])) if started else None
+    top_genre = max(by_genre.values(), key=lambda g: (g["top"], -g["left"])) if by_genre else None
+    return {
+        "login": user, "solved": listing["solved"], "total": listing["total"],
+        "streak": streak, "last_ac_day": ac_days[0] if ac_days else None,
+        "today": today.isoformat(),
+        "last": _slim(last), "next": _slim(nxt), "next2": _slim(next2), "hint": _slim(hint_row),
+        "near": near, "top_genre": top_genre, "genres_total": len(by_genre),
+        "genres_left": sum(1 for g in by_genre.values() if g["left"]),
+        "events": events[:400],
+    }
 
 
 # ---------------------------------------------------------------- activity

@@ -60,33 +60,35 @@ def dir_for_pid(ws: Path, pid: str) -> Path | None:
     return None
 
 
+def with_meta_rows(statement: str, title: str, rows: list[tuple[str, str]]) -> str:
+    """The statement already opens with the corpus's `# ID — title` and its
+    front-matter table; append our rows to that table rather than adding a second
+    header. Synthesises a header only if a statement has no table."""
+    lines = statement.strip().splitlines()
+    first_section = next((i for i, ln in enumerate(lines) if ln.startswith("## ")), len(lines))
+    table_rows = [i for i in range(first_section) if lines[i].startswith("| **")]
+    extra = [f"| **{k}** | {v} |" for k, v in rows]
+    if not table_rows:
+        return "\n".join([f"# {title}", "", "| | |", "|---|---|", *extra, "", *lines])
+    cut = table_rows[-1] + 1
+    return "\n".join(lines[:cut] + extra + lines[cut:])
+
+
 def render_problem_md(p: dict) -> str:
-    pr = p.get("practice") or {}
     rows = [
-        ("Corpus", f"{p.get('corpus', '')} · Tier {p.get('tier', '')}"
-                   + (f" · {p['round']}" if p.get("round") else "")
-                   + (f" · published {p['published']}" if p.get("published") else "")),
         ("Genre", p.get("genre", "") + (f" (corpus: {p['genre_corpus']})"
-                                        if p.get("genre_corpus") and p.get("genre_corpus") != p.get("genre") else "")),
+                                        if p.get("genre_corpus") and p.get("genre_corpus") != p.get("genre") else "")
+                  + f" · {p.get('family_n', 0)} problems share it"),
         ("Importance", f"{p.get('importance', 0)}/100"
                        + (f" · shape rank #{p['rank']}" if p.get("rank") else "")
+                       + f" · seen in {p.get('pubs', 1)} publication(s)"
                        + (f" · priority {'★' * int(p['priority'])}" if p.get("priority") else "")),
-        ("Seen", f"{p.get('pubs', 1)} publication(s) · {p.get('family_n', 0)} problems share the genre"),
-        ("Source", p.get("link") or "—"),
     ]
-    if pr.get("url"):
-        rows.append(("Practice", f"[{pr.get('label', 'judge')}]({pr['url']}) {'⭐' * int(pr.get('stars') or 0)}"
-                                 + (f" — {pr['note']}" if pr.get("note") else "")))
     if p.get("tags"):
         rows.append(("Tags", ", ".join(p["tags"])))
-    table = "| | |\n|---|---|\n" + "\n".join(f"| **{k}** | {v} |" for k, v in rows)
     required = " ".join(f"`{r}`" for r in p.get("required") or []) or "—"
     out = [
-        f"# {p.get('id', '')} — {p.get('title', '')}",
-        "",
-        table,
-        "",
-        p.get("statement", "").strip(),
+        with_meta_rows(p.get("statement", ""), f"{p.get('id', '')} — {p.get('title', '')}", rows),
         "",
         "## Required API",
         "",
