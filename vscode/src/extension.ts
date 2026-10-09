@@ -386,7 +386,7 @@ async function setTags(pid?: string): Promise<void> {
 }
 
 async function openInBrowser(pid?: string): Promise<void> {
-  const url = pid ? `${config.site()}/problem.html?id=${encodeURIComponent(pid)}` : `${config.site()}/`;
+  const url = pid ? `${config.site()}/problem/${pid.split("/").map(encodeURIComponent).join("/")}` : `${config.site()}/`;
   await vscode.env.openExternal(vscode.Uri.parse(url));
 }
 

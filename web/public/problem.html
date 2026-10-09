@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="dark"><title>mogi</title>
+<body style="background:#060a14"><script>
+// Legacy link: /problem.html?id=Amazon%2FA16 (or a bare id) → the app's route.
+const id = new URLSearchParams(location.search).get("id") || "";
+location.replace(id.includes("/")
+  ? "/problem/" + id.split("/").map(encodeURIComponent).join("/")
+  : "/problems" + (id ? "?open=" + encodeURIComponent(id) : ""));
+</script>

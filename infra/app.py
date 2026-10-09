@@ -29,15 +29,18 @@ ACCOUNT = "711387111223"
 REGION = "eu-west-1"
 GITHUB_LOGIN = "shiroyang"
 SYNC_REPO = "shiroyang/oj-solutions"
-WEB = Path(__file__).resolve().parent.parent / "web"
+DIST = Path(__file__).resolve().parent.parent / "web" / "dist"  # `cd web && npm run build`
 
 
-def asset_version() -> str:
-    """Short content hash of the JS/CSS. The HTML references them as
-    `/mogi.js?v=<hash>`, so a browser can never pair a new page with a script it
-    cached months ago (the bug behind "IMPORTANCE_HELP is not defined")."""
+def dist_version() -> str:
+    """Short content hash of the built site, exported as a stack output so a deploy
+    can be matched to a build. Vite already hashes asset filenames; index.html is
+    served no-cache so browsers always pick up a new build."""
+    if not (DIST / "index.html").exists():
+        raise SystemExit("web/dist is missing — run `cd web && npm ci && npm run build` first")
     h = hashlib.sha256()
-    for f in sorted(WEB.glob("*.js")) + sorted(WEB.glob("*.css")):
+    for f in sorted(p for p in DIST.rglob("*") if p.is_file()):
+        h.update(f.relative_to(DIST).as_posix().encode())
         h.update(f.read_bytes())
     return h.hexdigest()[:10]
 
@@ -127,6 +130,20 @@ class MogiStack(cdk.Stack):
                 "}"
             ),
         )
+        # The UI is a single-page app: any path without a file extension
+        # (/problems, /problem/Amazon/A16) is served the app shell and routed in
+        # the browser. Done here rather than with custom error responses, which
+        # would also rewrite the API's own 403/404 JSON.
+        spa = cf.Function(
+            self, "SpaRouting",
+            code=cf.FunctionCode.from_inline(
+                "function handler(event) {\n"
+                "  var r = event.request;\n"
+                "  if (r.uri !== '/' && r.uri.indexOf('.') === -1) { r.uri = '/index.html'; }\n"
+                "  return r;\n"
+                "}"
+            ),
+        )
 
         dist = cf.Distribution(
             self, "Dist",
@@ -137,6 +154,8 @@ class MogiStack(cdk.Stack):
                 origin=origins.S3BucketOrigin.with_origin_access_control(site),
                 viewer_protocol_policy=cf.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cf.CachePolicy.CACHING_OPTIMIZED,
+                function_associations=[cf.FunctionAssociation(
+                    function=spa, event_type=cf.FunctionEventType.VIEWER_REQUEST)],
             ),
             additional_behaviors={
                 "/api/*": cf.BehaviorOptions(
@@ -154,17 +173,14 @@ class MogiStack(cdk.Stack):
             },
         )
 
-        # HTML is rendered at synth time with the asset hash substituted for
-        # {{v}}; everything is served `Cache-Control: no-cache` so browsers
-        # revalidate (ETag → 304) instead of trusting heuristic freshness.
-        version = asset_version()
-        html_sources = [
-            s3deploy.Source.data(p.name, p.read_text(encoding="utf-8").replace("{{v}}", version))
-            for p in sorted(WEB.glob("*.html"))
-        ]
+        # The Vite build (web/dist). Everything is served `Cache-Control: no-cache`
+        # so browsers revalidate (ETag → 304) instead of trusting heuristic
+        # freshness; Vite's hashed asset names keep index.html and its scripts
+        # consistent with each other.
+        version = dist_version()
         s3deploy.BucketDeployment(
             self, "DeploySite",
-            sources=[s3deploy.Source.asset(str(WEB), exclude=["*.html"]), *html_sources],
+            sources=[s3deploy.Source.asset(str(DIST))],
             destination_bucket=site,
             distribution=dist,
             distribution_paths=["/*"],
@@ -181,7 +197,7 @@ class MogiStack(cdk.Stack):
                       value=f"https://{dist.distribution_domain_name}/api/auth/callback")
         cdk.CfnOutput(self, "TableName", value=table.table_name)
         cdk.CfnOutput(self, "JudgeFunction", value=judge_fn.function_name)
-        cdk.CfnOutput(self, "AssetVersion", value=version)
+        cdk.CfnOutput(self, "SiteVersion", value=version)
 
 
 app = cdk.App()

@@ -325,7 +325,7 @@ def cmd_web(ctx: Ctx) -> int:
     if ctx.args.id:
         row = ctx.resolve(ctx.args.id)
         from urllib.parse import quote
-        url += f"problem.html?id={quote(row['pid'], safe='')}"
+        url += "problem/" + "/".join(quote(seg, safe="") for seg in row["pid"].split("/"))
     print(url)
     webbrowser.open(url)
     return 0

@@ -181,6 +181,12 @@ def _redirect(url: str, cookies: list[str] | None = None) -> dict:
 
 
 def _origin(event) -> str:
+    """The viewer-facing origin for OAuth redirects. CloudFront stashes the real
+    host in x-forwarded-host; a front door that doesn't (e.g. a Vercel rewrite)
+    can pin it with the optional /mogi/site-origin parameter."""
+    override = _param("site-origin", required=False)
+    if override:
+        return override.rstrip("/")
     host = (event.get("headers") or {}).get("x-forwarded-host") \
         or (event.get("headers") or {}).get("host", "")
     return f"https://{host}"

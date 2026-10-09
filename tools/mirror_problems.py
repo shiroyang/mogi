@@ -47,7 +47,7 @@ def problem_md(it: dict) -> str:
         ("Genre", it["genre"] + f" ({it['family_n']} problems share it)"),
         ("Importance", f"{it['importance']}/100" + (f" · shape rank #{it['rank']}" if it["rank"] else "")
                        + f" · seen in {it['pubs']} publication(s)"),
-        ("Judge", f"[{it['corpus']}/{it['id']} on mogi]({JUDGE}/problem.html?id={it['corpus']}%2F{it['id']})"),
+        ("Judge", f"[{it['corpus']}/{it['id']} on mogi]({JUDGE}/problem/{it['corpus']}/{it['id']})"),
         ("Solution", f"[`{it['slug']}.py`](./{it['slug']}.py) once accepted"),
     ]
     required = " ".join(f"`{r}`" for r in it["required"]) or "—"

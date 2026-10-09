@@ -65,23 +65,40 @@ CLI ─────┴─ /api/* ──► HTTP API ──► api Lambda ──�
   one overwrite the other. Every route, URL and local directory now carries the
   corpus; a bare id still works wherever it is unambiguous (`mogi open A16`).
 
-## Home
+## The web app (`web/`)
 
-`/` is a single glass card on dark water (`web/index.html`, `home.css`, `home.js`):
-a one-sentence state of the campaign ("7 of 250 solved. Three-day streak.
-Specification/Filter is 2 problems from done."), then exactly three actions —
-**Continue** (the unsolved problem you touched most recently on any device, or the
-one this browser last had open if that is newer), **Next up** (highest-ranked
-unsolved), **All problems** (the table at `/problems.html`) — and the last 26 weeks
-as a quiet heatmap. Everything comes from one call, `GET /api/home`, which also
-returns the streak and the genre closest to completion. Runs now update `last_at`
-too, so "working on it" counts even before a submission.
+A Vite + React + TypeScript single-page app with one design system across three
+routes, built mobile-first so it works as an iPhone home-screen app
+(`manifest.webmanifest`, safe-area padding, 44 px targets, no input auto-zoom):
 
-The water is CSS: blurred colour blobs drifting under an SMIL-animated
-`feTurbulence` displacement; the card is `backdrop-filter` glass with a gradient
-rim and specular sheen everywhere, and on Chromium a real edge refraction
-(`backdrop-filter: url(#glassRefract)` fed by a canvas-generated displacement map,
-the technique from archisvaze/liquid-glass). `prefers-reduced-motion` stills it.
+- `/` — **Home**: one glass card on the water. A one-sentence state of the campaign
+  ("7 of 250 solved. Three-day streak. DP is 2 problems from done."), then exactly
+  three actions — **Continue** (the unsolved problem you touched most recently on
+  any device, or the one this browser last had open if newer), **Next up**
+  (highest-ranked unsolved), **All problems** — and a 26-week heatmap. One call,
+  `GET /api/home`; runs update `last_at`, so "working on it" counts before a submit.
+- `/problems` — search, genre chips, sort, a filters sheet, group-by-genre with
+  collapsible sections, tap-to-star, ✎ categorise. Rows become cards on phones.
+- `/problem/<Corpus>/<id>` — split view on desktop (statement + required API |
+  editor, verdicts, submissions); on phones a Statement / Code / Result segmented
+  control with a bottom Run / Submit bar. The editor is CodeMirror 6, bundled
+  (no CDN), Python-highlighted on the app's palette, ⌘↩ run / ⇧⌘↩ submit.
+
+Old links keep working: `/problem.html?id=…` and `/problems.html` redirect.
+
+The water is one WebGL fragment shader on a half-resolution canvas (drifting
+colour bodies + a faint caustic shimmer), 30 fps on touch devices, paused when the
+tab is hidden, a still frame under reduced motion. Everything else animates only
+transforms and opacity (Motion springs for the sheet and segmented control), which
+is what makes it smooth where the previous CSS-filter version stuttered. Glass is
+`backdrop-filter` with a gradient rim and specular sheen.
+
+```bash
+cd web && npm ci
+npm run dev        # http://localhost:5173 — /api is proxied to the judge with the CLI's token
+npm test           # vitest: ranking, filters, grouping, copy
+npm run build      # → web/dist (deployed by the CDK stack below)
+```
 
 ## Genre, frequency, importance — and your own categorisation
 
@@ -156,11 +173,24 @@ style chaining works. `mogi run` / `mogi submit` find the problem from the neare
 ## Deploy
 
 ```bash
+(cd web && npm ci && npm run build)                           # the stack deploys web/dist
 cd infra
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 npx -y aws-cdk@latest bootstrap aws://<account>/<region>   # once
 npx -y aws-cdk@latest deploy
 ```
+
+A CloudFront Function serves `index.html` for any extensionless path, so the SPA's
+routes work on reload; the API behaviour is untouched (custom error responses would
+have rewritten its JSON errors too).
+
+**Hosting the UI elsewhere.** `web/vercel.json` makes the same build deployable on
+Vercel: `/api/*` is rewritten to the API Gateway URL (same-origin, so cookies keep
+working) and everything else falls back to `index.html`. Two one-time steps when
+switching front doors: set the SSM parameter `/mogi/site-origin` to the new origin
+(the OAuth redirect is built from it), and change the GitHub OAuth app's callback
+URL to `<new origin>/api/auth/callback`. A custom domain on CloudFront works the
+same way (ACM certificate in us-east-1 + alias), without the Vercel hop.
 
 Edit the constants at the top of `infra/app.py` first (account, region, GitHub
 login, sync repo). Every resource is tagged `auto-delete: no` and `project: mogi`.
@@ -212,7 +242,7 @@ workspace layout, id resolution, config); `cd vscode && npm run typecheck`.
 ```
 backend/judge/   splitter.py (ast split, stub generation) · runner.py (sandbox) · handler.py
 backend/api/     handler.py (routes, OAuth + Bearer, JWT, meta, GitHub sync — stdlib + boto3 only)
-web/             index.html + home.css/js (glass home) · problems.html (table: sort/group/filter/categorise) · problem.html (Monaco + verdicts) · mogi.css/js
+web/             Vite + React app: src/pages (Home, Problems, Problem, Login) · src/components (Water shader, Sheet, Categorise, Editor, Verdict, ui) · src/model.ts (+tests) · vercel.json · legacy/ (the pre-React pages)
 cli/             mogi_cli/ (stdlib-only `mogi` command) · tests/
 vscode/          the VS Code extension (TypeScript, esbuild-bundled, no runtime deps)
 infra/           app.py (CDK, one stack)

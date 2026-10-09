@@ -2,46 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#060a14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="mogi">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <title>mogi</title>
-<link rel="stylesheet" href="/home.css?v={{v}}">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>">
 </head>
 <body>
-<!-- the water: slow drifting colour under a turbulence-displaced surface -->
-<div class="water" aria-hidden="true">
-  <div class="blob b1"></div>
-  <div class="blob b2"></div>
-  <div class="blob b3"></div>
-  <div class="blob b4"></div>
-  <div class="blob b5"></div>
-</div>
-<svg class="defs" width="0" height="0" aria-hidden="true" focusable="false">
-  <filter id="ripple" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
-    <feTurbulence type="fractalNoise" baseFrequency="0.0045 0.0075" numOctaves="2" seed="7" result="noise">
-      <animate attributeName="baseFrequency" dur="46s" values="0.0045 0.0075;0.0075 0.0045;0.0045 0.0075" repeatCount="indefinite"/>
-    </feTurbulence>
-    <feDisplacementMap in="SourceGraphic" in2="noise" scale="110" xChannelSelector="R" yChannelSelector="G"/>
-  </filter>
-  <!-- filled in by home.js where backdrop-filter: url() is supported -->
-  <filter id="glassRefract" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"></filter>
-</svg>
-
-<main class="stage">
-  <section class="glass card" id="card" aria-busy="true">
-    <div class="etch" aria-hidden="true">模擬</div>
-    <header class="top">
-      <a class="wordmark" href="/">mogi</a>
-      <span class="who" id="who"></span>
-    </header>
-    <div class="content" id="content">
-      <h1 class="headline">Loading your judge…</h1>
-    </div>
-  </section>
-</main>
-
-<script src="/mogi.js?v={{v}}"></script>
-<script src="/home.js?v={{v}}"></script>
+<div id="root"></div>
+<script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
