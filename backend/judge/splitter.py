@@ -166,7 +166,7 @@ def split_solution(source: str) -> Split:
     root_nodes = [by_name[n] for n in plumb_roots if n in by_name]
     if root_nodes:
         boundary = min(n.lineno for n in root_nodes)
-        moved_src, moved_names = [], set()
+        moved_src, moved_names, cut = [], set(), [(start, end)]
         for node in tree.body:
             if node is guard or node.lineno < boundary:
                 continue
@@ -175,6 +175,7 @@ def split_solution(source: str) -> Split:
                 first = min([node.lineno] +
                             [d.lineno for d in getattr(node, "decorator_list", [])])
                 moved_src.append("".join(lines[first - 1:node.end_lineno]))
+                cut.append((first - 1, node.end_lineno))
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                     moved_names.add(node.name)
                 else:
@@ -184,6 +185,10 @@ def split_solution(source: str) -> Split:
         if moved_src:
             harness = ("# -- test plumbing (relocated from module level) --\n"
                        + "\n".join(moved_src) + "\n\n" + harness)
+            # and out of the reference, so the model answer shown after AC (and
+            # the reference docs) is the solution alone, not the test scaffolding
+            reference = "".join(ln for i, ln in enumerate(lines)
+                                if not any(a <= i < b for a, b in cut)).rstrip() + "\n"
             required = [r for r in required if r not in moved_names]
             warnings.append(f"relocated test plumbing into harness: {sorted(moved_names)}")
 

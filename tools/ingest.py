@@ -202,6 +202,7 @@ def collect(corpus_root: Path) -> tuple[list[dict], list[str], dict]:
                 "practice": parse_practice(meta.get("practice", "")),
                 "link": link_m.group(0).rstrip("|) ") if link_m else "",
                 "alt_link": alt_m.group(0).rstrip("|) ") if alt_m else "",
+                "solution_row": meta.get("solution", ""),  # "…py — N self-checks"
                 "statement": visible, "analysis": analysis,
                 "reference": s.reference, "harness": s.harness,
                 "imports": s.imports, "required": s.required, "stub": s.stub,

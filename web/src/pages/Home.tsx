@@ -9,13 +9,15 @@ import { readLast, useAsync } from "../hooks";
 import { homeCopy, plural, progressText } from "../model";
 import { Login } from "./Login";
 
-function Tile({ to, label, p, sub, primary }: { to: string; label: string; p?: Slim | null; sub: string; primary?: boolean }) {
+function Tile({ to, label, p, title, sub, primary }:
+  { to: string; label: string; p?: Slim | null; title?: string; sub: string; primary?: boolean }) {
+  const heading = p ? <><span className="id">{p.id}</span>{p.title}</> : (title ?? sub);
   return (
     <motion.div whileTap={{ scale: .985 }} transition={{ type: "spring", stiffness: 500, damping: 30 }}>
       <Link className={`tile ${primary ? "primary" : ""}`} to={to}>
         <span className="label">{label}</span>
-        <span className="title">{p ? <><span className="id">{p.id}</span>{p.title}</> : sub}</span>
-        {p && <span className="sub">{sub}</span>}
+        <span className="title">{heading}</span>
+        {(p || title) && <span className="sub">{sub}</span>}
       </Link>
     </motion.div>
   );
@@ -37,12 +39,13 @@ function Body({ h, local }: { h: HomeData; local: ReturnType<typeof readLast> })
       <h1 className="headline">{headline}</h1>
       <p className="support">{support.join(" ")}</p>
       <div className="tiles">
-        {cont && <Tile to={problemHref(cont.pid)} label="Continue" p={cont} sub={progressText(cont)} primary />}
-        {start && <Tile to={problemHref(start.pid)} label="Start here" p={start} sub={`${start.genre}, importance ${start.importance}`} primary />}
+        <Tile to="/problems" label="All problems" primary title={`${h.total} problems, sorted by importance`}
+          sub={`${plural(h.genres_left, "genre", "genres")} still open — search, filter, group, star`} />
         <div className="row">
+          {cont && <Tile to={problemHref(cont.pid)} label="Continue" p={cont} sub={progressText(cont)} />}
+          {start && <Tile to={problemHref(start.pid)} label="Start here" p={start} sub={`${start.genre}, importance ${start.importance}`} />}
           {next && <Tile to={problemHref(next.pid)} label="Next up" p={next}
             sub={`${next.genre}, importance ${next.importance}${next.priority ? ", starred by you" : ""}`} />}
-          <Tile to="/problems" label="All problems" sub={`${h.total} problems, ${plural(h.genres_left, "genre", "genres")} still open`} />
         </div>
       </div>
       <Heatmap events={h.events || []} caption="the last 26 weeks" />

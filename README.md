@@ -226,11 +226,15 @@ uploading — if a problem's own reference can't get AC, nothing is written.
 the old bare-id rows); `tools/migrate_ids.py --apply` moves per-user progress and
 submission rows from bare ids to corpus-qualified ones.
 
-`tools/mirror_problems.py <corpus> --repo <owner>/<repo>` mirrors every question
-(statement, required API, stub, links — no spoilers) into the solutions repo as
-`<Corpus>/<slug>.md` next to the judge's `<Corpus>/<slug>.py`, and regenerates its
-README as an index sorted by importance with ✅ on accepted problems. The repo can
-be private: the judge's OAuth token carries the `repo` scope.
+`tools/mirror_problems.py <corpus> --repo <owner>/<repo>` mirrors into the solutions
+repo (github.com/shiroyang/mogi-solutions, private — the judge's OAuth token carries
+the `repo` scope), next to the judge's accepted-solution file `<Corpus>/<slug>.py`:
+`<Corpus>/<slug>.md`, the spoiler-free question, and `<Corpus>/<slug>.reference.md`,
+the reference solution — the corpus's own analysis regrouped as *how it's solved*,
+*the core code explained*, hand-trace, edge cases, complexity, production notes and
+the follow-up ladder, then the complete clean implementation and the tests the judge
+runs. It also regenerates the README as an index sorted by importance with ✅ on
+accepted problems. The judge's sync target is the SSM parameter `/mogi/sync-repo`.
 
 ## Verification
 

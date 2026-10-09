@@ -28,7 +28,7 @@ from constructs import Construct
 ACCOUNT = "711387111223"
 REGION = "eu-west-1"
 GITHUB_LOGIN = "shiroyang"
-SYNC_REPO = "shiroyang/oj-solutions"
+SYNC_REPO = "shiroyang/mogi-solutions"
 DIST = Path(__file__).resolve().parent.parent / "web" / "dist"  # `cd web && npm run build`
 
 
