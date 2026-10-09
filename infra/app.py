@@ -55,8 +55,11 @@ class MogiStack(cdk.Stack):
             runtime=lam.Runtime.PYTHON_3_13,
             code=lam.Code.from_asset("../backend/judge"),
             handler="handler.lambda_handler",
-            memory_size=1024,
-            timeout=Duration.seconds(60),
+            # 1769 MB = one full vCPU: harnesses are CPU-bound (C27b's N=100k
+            # self-check runs ~30 s on a laptop). Per-problem time limits are
+            # capped at 100 s by the ingester, under this 120 s timeout.
+            memory_size=1769,
+            timeout=Duration.seconds(120),
             environment={"TABLE": table.table_name},
             description="mogi: sandboxed submission runner",
         )

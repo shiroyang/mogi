@@ -1,0 +1,135 @@
+{
+  "name": "mogi",
+  "displayName": "mogi — 真題 judge",
+  "description": "Solve the 真題 interview corpus from VS Code: problem tree grouped by genre and sorted by importance, statement panel, Run / Submit with inline diagnostics.",
+  "version": "0.1.0",
+  "publisher": "shiroyang",
+  "license": "MIT",
+  "private": true,
+  "repository": { "type": "git", "url": "https://github.com/shiroyang/mogi" },
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Education", "Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "mogi", "title": "mogi", "icon": "media/icon.svg" }
+      ]
+    },
+    "views": {
+      "mogi": [
+        { "id": "mogiProblems", "name": "Problems", "icon": "media/icon.svg", "contextualTitle": "mogi" }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "mogiProblems",
+        "contents": "Sign in to load the 真題 problem set.\n[Sign in with GitHub](command:mogi.login)\nThe token is shared with the `mogi` CLI (~/.config/mogi/config.json).",
+        "when": "!mogi.signedIn"
+      },
+      {
+        "view": "mogiProblems",
+        "contents": "Loading problems…\n[Refresh](command:mogi.refresh)",
+        "when": "mogi.signedIn"
+      }
+    ],
+    "commands": [
+      { "command": "mogi.login", "title": "Sign in with GitHub", "category": "mogi", "icon": "$(sign-in)" },
+      { "command": "mogi.logout", "title": "Sign out", "category": "mogi", "icon": "$(sign-out)" },
+      { "command": "mogi.refresh", "title": "Refresh problems", "category": "mogi", "icon": "$(refresh)" },
+      { "command": "mogi.search", "title": "Search problems…", "category": "mogi", "icon": "$(search)" },
+      { "command": "mogi.pickOne", "title": "Pick one — most important unsolved", "category": "mogi", "icon": "$(target)" },
+      { "command": "mogi.groupBy", "title": "Group by…", "category": "mogi", "icon": "$(list-tree)" },
+      { "command": "mogi.sortBy", "title": "Sort by…", "category": "mogi", "icon": "$(sort-precedence)" },
+      { "command": "mogi.toggleSolved", "title": "Show / hide solved problems", "category": "mogi", "icon": "$(eye)" },
+      { "command": "mogi.openProblem", "title": "Open problem", "category": "mogi" },
+      { "command": "mogi.showStatement", "title": "Show statement", "category": "mogi", "icon": "$(book)" },
+      { "command": "mogi.run", "title": "Run tests", "category": "mogi", "icon": "$(play)" },
+      { "command": "mogi.submit", "title": "Submit", "category": "mogi", "icon": "$(cloud-upload)" },
+      { "command": "mogi.setPriority", "title": "Set priority ★", "category": "mogi", "icon": "$(star)" },
+      { "command": "mogi.setGenre", "title": "Set genre", "category": "mogi", "icon": "$(tag)" },
+      { "command": "mogi.setTags", "title": "Edit tags", "category": "mogi", "icon": "$(bookmark)" },
+      { "command": "mogi.openInBrowser", "title": "Open on the web", "category": "mogi", "icon": "$(globe)" },
+      { "command": "mogi.openWorkspaceFolder", "title": "Add the mogi workspace folder to this window", "category": "mogi", "icon": "$(folder-opened)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "mogi.search", "when": "view == mogiProblems", "group": "navigation@1" },
+        { "command": "mogi.pickOne", "when": "view == mogiProblems", "group": "navigation@2" },
+        { "command": "mogi.groupBy", "when": "view == mogiProblems", "group": "navigation@3" },
+        { "command": "mogi.sortBy", "when": "view == mogiProblems", "group": "navigation@4" },
+        { "command": "mogi.refresh", "when": "view == mogiProblems", "group": "navigation@5" },
+        { "command": "mogi.toggleSolved", "when": "view == mogiProblems", "group": "1_view@1" },
+        { "command": "mogi.openWorkspaceFolder", "when": "view == mogiProblems", "group": "1_view@2" },
+        { "command": "mogi.login", "when": "view == mogiProblems && !mogi.signedIn", "group": "2_auth@1" },
+        { "command": "mogi.logout", "when": "view == mogiProblems && mogi.signedIn", "group": "2_auth@2" }
+      ],
+      "view/item/context": [
+        { "command": "mogi.setPriority", "when": "view == mogiProblems && viewItem == problem", "group": "inline@1" },
+        { "command": "mogi.openInBrowser", "when": "view == mogiProblems && viewItem == problem", "group": "inline@2" },
+        { "command": "mogi.setPriority", "when": "view == mogiProblems && viewItem == problem", "group": "1_meta@1" },
+        { "command": "mogi.setGenre", "when": "view == mogiProblems && viewItem == problem", "group": "1_meta@2" },
+        { "command": "mogi.setTags", "when": "view == mogiProblems && viewItem == problem", "group": "1_meta@3" },
+        { "command": "mogi.openInBrowser", "when": "view == mogiProblems && viewItem == problem", "group": "2_open@1" }
+      ],
+      "editor/title": [
+        { "command": "mogi.run", "when": "mogi.problemFile", "group": "navigation@1" },
+        { "command": "mogi.submit", "when": "mogi.problemFile", "group": "navigation@2" },
+        { "command": "mogi.showStatement", "when": "mogi.problemFile", "group": "navigation@3" }
+      ],
+      "commandPalette": [
+        { "command": "mogi.openProblem", "when": "false" }
+      ]
+    },
+    "keybindings": [
+      { "command": "mogi.run", "key": "alt+r", "when": "mogi.problemFile && editorTextFocus" },
+      { "command": "mogi.submit", "key": "alt+s", "when": "mogi.problemFile && editorTextFocus" },
+      { "command": "mogi.search", "key": "alt+o", "when": "!terminalFocus" }
+    ],
+    "configuration": {
+      "title": "mogi",
+      "properties": {
+        "mogi.site": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Judge URL. Leave empty to use the one in `~/.config/mogi/config.json` (shared with the CLI)."
+        },
+        "mogi.workspace": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Where problem directories are created. Leave empty to use the config file value (default `~/mogi`)."
+        },
+        "mogi.groupBy": {
+          "type": "string",
+          "enum": ["genre", "tier", "corpus", "status", "none"],
+          "default": "genre",
+          "description": "How the problem tree is grouped."
+        },
+        "mogi.sortBy": {
+          "type": "string",
+          "enum": ["importance", "frequency", "id", "recent", "attempts"],
+          "default": "importance",
+          "description": "Order of problems inside each group. Importance = your ★ priority first, then the computed score."
+        },
+        "mogi.hideSolved": {
+          "type": "boolean",
+          "default": false,
+          "description": "Hide solved problems in the tree."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "package": "npm run typecheck && npm run build && npx -y @vscode/vsce@4 package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}

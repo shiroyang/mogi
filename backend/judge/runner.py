@@ -41,6 +41,9 @@ SAFE_ENV = {
     "HOME": "/tmp",
     "LANG": "C.UTF-8",
     "PYTHONIOENCODING": "utf-8",
+    # stdout to a pipe is block-buffered; unbuffered means the PASS lines already
+    # printed survive the kill on a TLE, so "N checks passed before timeout" is real
+    "PYTHONUNBUFFERED": "1",
 }
 
 ADAPTER = """\
@@ -155,7 +158,7 @@ def _split_output(stdout: str) -> tuple[list[dict], str]:
 
 def judge(user_code: str, harness: str, imports: str, *,
           required: list[str] | None = None,
-          time_limit_s: int = 20, mem_mb: int = 640,
+          time_limit_s: int = 20, mem_mb: int = 1024,
           python: str = sys.executable) -> dict:
     def result(verdict: str, passed: int, total, ms: int, detail: str,
                stdout: str = "", stderr: str = "", trace: str = "",

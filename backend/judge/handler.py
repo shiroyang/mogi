@@ -19,7 +19,7 @@ ddb = boto3.resource("dynamodb").Table(TABLE)
 
 
 def lambda_handler(event, _ctx):
-    prob_id = event["prob"]
+    prob_id = event.get("pid") or event["prob"]  # corpus-qualified, e.g. Amazon/A16
     sub_sk = event["sub_sk"]
     user = event["user"]
     mode = event.get("mode", "submit")

@@ -1,10 +1,16 @@
 """mogi API — a single Lambda behind CloudFront `/api/*`.
 
-Auth: GitHub OAuth (authorization-code flow) with a single-user allowlist; the
-session is a stateless HS256 JWT in an HttpOnly cookie. The GitHub token from
-login rides inside the session and is used to push accepted solutions to the
-sync repo — unless the least-privilege `/mogi/sync-pat` parameter is set, in
-which case login only asks for `read:user` and sync uses the PAT.
+Auth: GitHub OAuth (authorization-code flow) with a single-user allowlist. The
+session is a stateless HS256 JWT, carried either in an HttpOnly cookie (browser)
+or as `Authorization: Bearer …` (the CLI and the VS Code extension, which obtain a
+long-lived token through `/auth/cli`). The GitHub token from login rides inside the
+session and is used to push accepted solutions to the sync repo — unless the
+least-privilege `/mogi/sync-pat` parameter is set, in which case login only asks
+for `read:user` and sync uses the PAT.
+
+Problem ids are corpus-qualified — `Amazon/A16`, `Google/C07` — because the two
+corpora reuse bare ids (`C07` exists in both). Routes take the two segments as-is:
+`/problems/Amazon/A16`, `/submissions/Google/C07/<sk>`.
 
 Stdlib + boto3 only, deliberately: the deploy artifact is the bare directory.
 """
@@ -33,6 +39,12 @@ lam = boto3.client("lambda")
 ssm = boto3.client("ssm")
 
 MAX_CODE = 64_000
+SESSION_DAYS = 30
+CLI_TOKEN_DAYS = 365
+# Slim per-problem fields copied from PROBLIST rows into the list response.
+LIST_FIELDS = ("id", "title", "corpus", "tier", "genre", "family", "family_n", "rank",
+               "pubs", "confidence", "importance", "practice_stars", "practice_url",
+               "published", "round", "checks")
 _param_cache: dict[str, tuple[float, str | None]] = {}
 
 
@@ -126,6 +138,20 @@ def _plain(obj):
     return obj
 
 
+def _query_all(**kw) -> list[dict]:
+    """Query every page — the problem list is ~250 rows and must never truncate."""
+    items: list[dict] = []
+    start = None
+    while True:
+        if start:
+            kw["ExclusiveStartKey"] = start
+        page = ddb.query(**kw)
+        items.extend(page["Items"])
+        start = page.get("LastEvaluatedKey")
+        if not start:
+            return items
+
+
 class ApiError(Exception):
     def __init__(self, status: int, msg: str):
         super().__init__(msg)
@@ -160,10 +186,27 @@ def _origin(event) -> str:
 
 
 def _session(event) -> dict | None:
+    headers = event.get("headers") or {}
+    auth = headers.get("authorization", "")
+    if auth[:7].lower() == "bearer ":
+        return jwt_decode(auth[7:].strip())
     for c in event.get("cookies") or []:
         if c.startswith("mogi_session="):
             return jwt_decode(c.split("=", 1)[1])
     return None
+
+
+def _body(event) -> dict:
+    raw = event.get("body") or ""
+    if event.get("isBase64Encoded"):
+        raw = base64.b64decode(raw).decode("utf-8", "replace")
+    try:
+        data = json.loads(raw or "{}")
+    except ValueError:
+        raise ApiError(400, "body is not JSON")
+    if not isinstance(data, dict):
+        raise ApiError(400, "body must be a JSON object")
+    return data
 
 
 def lambda_handler(event, _ctx):
@@ -188,35 +231,52 @@ def _route(event, method: str, path: str) -> dict:
         return _callback(event)
     if path == "/auth/logout":
         return _redirect("/", ["mogi_session=; Path=/; Max-Age=0"])
+    if path == "/auth/cli":
+        return _cli_handoff(event)
 
     sess = _session(event)
     if not sess:
         return _resp(401, {"error": "not signed in"})
     user = sess["u"]
+    parts = [p for p in path.split("/") if p]
 
     if path == "/me":
-        return _resp(200, {"login": user})
-    if path == "/problems":
-        return _resp(200, _problems(user))
-    if path.startswith("/problems/"):
-        return _resp(200, _problem(user, path.split("/")[2]))
+        return _resp(200, {
+            "login": user, "cli": bool(sess.get("cli")),
+            "can_sync": bool(sess.get("gh") or _param("sync-pat", required=False)),
+        })
+    if parts[:1] == ["problems"]:
+        if len(parts) == 1 and method == "GET":
+            return _resp(200, _problems(user))
+        if len(parts) == 3 and method == "GET":
+            return _resp(200, _problem(user, f"{parts[1]}/{parts[2]}"))
+        if len(parts) == 4 and parts[3] == "meta" and method in ("PUT", "POST"):
+            return _resp(200, _set_meta(user, f"{parts[1]}/{parts[2]}", _body(event)))
     if path == "/submit" and method == "POST":
         if (event.get("headers") or {}).get("x-mogi") != "1":
             raise ApiError(403, "missing x-mogi header")
-        return _resp(200, _submit(user, json.loads(event.get("body") or "{}")))
-    if path.startswith("/submissions/"):
-        _, _, prob, sk = path.split("/", 3)
-        return _resp(200, _poll(user, sess, prob, urllib.parse.unquote(sk)))
+        return _resp(200, _submit(user, _body(event)))
+    if parts[:1] == ["submissions"] and len(parts) == 4:
+        return _resp(200, _poll(user, sess, f"{parts[1]}/{parts[2]}",
+                                urllib.parse.unquote(parts[3])))
     if path == "/activity":
         return _resp(200, _activity(user))
     raise ApiError(404, f"no route {method} {path}")
 
 
 # ---------------------------------------------------------------- auth
+def _safe_next(value: str | None) -> str:
+    """Only same-origin paths may be used as a post-login destination."""
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    return value[:400]
+
+
 def _login(event) -> dict:
     client_id = _param("github/client-id")
     scope = "read:user" if _param("sync-pat", required=False) else "repo"
-    state = jwt_encode({"p": "state", "exp": time.time() + 600})
+    nxt = _safe_next((event.get("queryStringParameters") or {}).get("next"))
+    state = jwt_encode({"p": "state", "next": nxt, "exp": time.time() + 600})
     q = urllib.parse.urlencode({
         "client_id": client_id,
         "redirect_uri": f"{_origin(event)}/api/auth/callback",
@@ -245,116 +305,248 @@ def _callback(event) -> dict:
     allowed = _param("allowed-github-login")
     if login.lower() != allowed.lower():
         raise ApiError(403, f"GitHub user @{login} is not allowed on this judge")
-    session = jwt_encode({"u": login, "gh": access, "exp": time.time() + 30 * 86400})
+    session = jwt_encode({"u": login, "gh": access, "exp": time.time() + SESSION_DAYS * 86400})
     cookie = (f"mogi_session={session}; Path=/; HttpOnly; Secure; "
-              f"SameSite=Lax; Max-Age={30 * 86400}")
-    return _redirect("/", [cookie])
+              f"SameSite=Lax; Max-Age={SESSION_DAYS * 86400}")
+    return _redirect(_safe_next(state.get("next")), [cookie])
+
+
+def _cli_handoff(event) -> dict:
+    """Hand a long-lived bearer token to a local client (CLI / VS Code).
+
+    The client listens on 127.0.0.1:<port> and opens this URL in the browser. If
+    the browser has no session yet we bounce through GitHub login and come back
+    here. The token travels in the URL *fragment*, which browsers never send to a
+    server, so it does not appear in request logs; the local listener's page reads
+    it from `location.hash` and posts it to itself.
+    """
+    qs = event.get("queryStringParameters") or {}
+    try:
+        port = int(qs.get("port", ""))
+    except ValueError:
+        raise ApiError(400, "port is required")
+    if not 1024 <= port <= 65535:
+        raise ApiError(400, "port out of range")
+    state = qs.get("state", "")[:64]
+    sess = _session(event)
+    if not sess:
+        here = "/api/auth/cli?" + urllib.parse.urlencode({"port": port, "state": state})
+        return _redirect("/api/auth/login?" + urllib.parse.urlencode({"next": here}))
+    payload = {"u": sess["u"], "cli": True, "exp": time.time() + CLI_TOKEN_DAYS * 86400}
+    if sess.get("gh") and not _param("sync-pat", required=False):
+        payload["gh"] = sess["gh"]  # needed for AC sync unless a PAT is configured
+    frag = urllib.parse.urlencode({"token": jwt_encode(payload), "state": state,
+                                   "login": sess["u"]})
+    return _redirect(f"http://127.0.0.1:{port}/callback#{frag}")
 
 
 # ---------------------------------------------------------------- problems
+def _rank_score(row: dict) -> int:
+    """Your own priority stars outrank the computed importance; ties by score."""
+    return int(row.get("priority") or 0) * 1000 + int(row.get("importance") or 0)
+
+
 def _problems(user: str) -> dict:
-    probs = ddb.query(
+    probs = _query_all(
         KeyConditionExpression="pk = :p",
         ExpressionAttributeValues={":p": "PROBLIST"},
-    )["Items"]
-    prog = ddb.query(
+    )
+    prog = _query_all(
         KeyConditionExpression="pk = :p AND begins_with(sk, :s)",
         ExpressionAttributeValues={":p": f"USER#{user}", ":s": "PROG#"},
-    )["Items"]
-    by_id = {p["sk"].split("#", 1)[1]: p for p in prog}
+    )
+    by_pid = {p["sk"].split("#", 1)[1]: p for p in prog}
     out = []
     for p in sorted(probs, key=lambda x: x["sk"]):
         pid = p["sk"]
-        st = by_id.get(pid, {})
-        out.append({"id": pid, "title": p.get("title", pid),
-                    "corpus": p.get("corpus"), "tier": p.get("tier", ""),
-                    "family": p.get("family", ""), "checks": p.get("checks", 0),
-                    "status": st.get("status", ""), "attempts": st.get("attempts", 0),
-                    "solved_at": st.get("solved_at")})
+        st = by_pid.get(pid, {})
+        row = {"pid": pid, **{k: p.get(k) for k in LIST_FIELDS}}
+        row["id"] = p.get("id") or pid.split("/", 1)[-1]
+        row["genre_corpus"] = p.get("genre") or p.get("family") or ""
+        row["genre"] = st.get("genre") or row["genre_corpus"]
+        row.update({
+            "status": st.get("status", ""), "attempts": st.get("attempts", 0),
+            "solved_at": st.get("solved_at"), "last_at": st.get("last_at"),
+            "priority": st.get("priority", 0), "tags": list(st.get("tags") or []),
+        })
+        out.append(row)
     solved = sum(1 for o in out if o["status"] == "solved")
-    return {"problems": out, "solved": solved, "total": len(out)}
+    genres = sorted({o["genre"] for o in out if o["genre"]}, key=str.lower)
+    return {"problems": out, "solved": solved, "total": len(out), "genres": genres}
 
 
-def _problem(user: str, prob_id: str) -> dict:
-    meta = ddb.get_item(Key={"pk": f"PROB#{prob_id}", "sk": "META"}).get("Item")
+def _next_unsolved(rows: list[dict], pid: str, genre: str) -> dict | None:
+    """The best next rep: same genre first, then anything — by rank score."""
+    cands = [r for r in rows if r["pid"] != pid and r["status"] != "solved"]
+    same = [r for r in cands if r["genre"] == genre]
+    pool = same or cands
+    if not pool:
+        return None
+    best = max(pool, key=lambda r: (_rank_score(r), r["pid"]))
+    return {"pid": best["pid"], "id": best["id"], "title": best["title"],
+            "same_genre": bool(same)}
+
+
+def _problem(user: str, pid: str) -> dict:
+    meta = ddb.get_item(Key={"pk": f"PROB#{pid}", "sk": "META"}).get("Item")
     if not meta:
-        raise ApiError(404, f"unknown problem {prob_id}")
-    prog = ddb.get_item(Key={"pk": f"USER#{user}", "sk": f"PROG#{prob_id}"}).get("Item", {})
+        raise ApiError(404, f"unknown problem {pid}")
+    prog = ddb.get_item(Key={"pk": f"USER#{user}", "sk": f"PROG#{pid}"}).get("Item", {})
     solved = prog.get("status") == "solved"
     subs = ddb.query(
         KeyConditionExpression="pk = :p",
-        ExpressionAttributeValues={":p": f"SUB#{prob_id}"},
+        ExpressionAttributeValues={":p": f"SUB#{pid}"},
         ScanIndexForward=False, Limit=15,
         ProjectionExpression="sk, verdict, passed, #tot, ms, #md, created, detail",
         ExpressionAttributeNames={"#tot": "total", "#md": "mode"},
     )["Items"]
+    genre_corpus = meta.get("genre") or meta.get("family", "")
     out = {
-        "id": prob_id, "title": meta.get("title"), "corpus": meta.get("corpus"),
+        "pid": pid, "id": meta.get("id") or pid.split("/", 1)[-1],
+        "slug": meta.get("slug", ""),
+        "title": meta.get("title"), "corpus": meta.get("corpus"),
         "tier": meta.get("tier", ""), "family": meta.get("family", ""),
-        "link": meta.get("link", ""), "statement": meta.get("statement", ""),
+        "genre": prog.get("genre") or genre_corpus, "genre_corpus": genre_corpus,
+        "family_n": meta.get("family_n", 0), "rank": meta.get("rank"),
+        "pubs": meta.get("pubs", 1), "confidence": meta.get("confidence", 0),
+        "importance": meta.get("importance", 0), "practice": meta.get("practice") or {},
+        "published": meta.get("published", ""), "round": meta.get("round", ""),
+        "link": meta.get("link", ""), "alt_link": meta.get("alt_link", ""),
+        "statement": meta.get("statement", ""),
         "required": meta.get("required", []), "stub": meta.get("stub", ""),
         "checks": meta.get("checks", 0), "status": prog.get("status", ""),
         "attempts": prog.get("attempts", 0), "solved": solved,
+        "priority": prog.get("priority", 0), "tags": list(prog.get("tags") or []),
         "submissions": subs,
     }
     if solved:  # spoilers unlock after the first AC
         out["analysis"] = meta.get("analysis", "")
         out["reference"] = meta.get("reference", "")
         out["tests"] = meta.get("harness", "")
+        if prog.get("ac_sub"):
+            sub = ddb.get_item(Key={"pk": f"SUB#{pid}", "sk": prog["ac_sub"]},
+                               ProjectionExpression="#c",
+                               ExpressionAttributeNames={"#c": "code"}).get("Item", {})
+            out["ac_code"] = sub.get("code", "")
+    listing = _problems(user)
+    out["next"] = _next_unsolved(listing["problems"], pid, out["genre"])
+    out["genres"] = listing["genres"]
     return out
+
+
+def _set_meta(user: str, pid: str, body: dict) -> dict:
+    """Your own categorisation of a problem: genre override, 0–5 priority
+    stars, free-form tags. Stored on the progress row; the corpus genre is kept
+    separately so a reset is always possible."""
+    if not ddb.get_item(Key={"pk": f"PROB#{pid}", "sk": "META"},
+                        ProjectionExpression="pk").get("Item"):
+        raise ApiError(404, f"unknown problem {pid}")
+    sets, removes, values = [], [], {}
+    names = {"#genre": "genre", "#priority": "priority", "#tags": "tags", "#meta_at": "meta_at"}
+    if "genre" in body:
+        genre = str(body.get("genre") or "").strip()[:60]
+        if genre:
+            sets.append("#genre = :g")
+            values[":g"] = genre
+        else:
+            removes.append("#genre")
+    if "priority" in body:
+        raw = body.get("priority")
+        try:
+            prio = int(raw) if raw not in (None, "") else 0
+        except (TypeError, ValueError):
+            raise ApiError(400, "priority must be an integer 0–5")
+        if not 0 <= prio <= 5:
+            raise ApiError(400, "priority must be 0–5")
+        if prio:
+            sets.append("#priority = :pr")
+            values[":pr"] = prio
+        else:
+            removes.append("#priority")
+    if "tags" in body:
+        tags = body.get("tags") or []
+        if isinstance(tags, str):
+            tags = tags.split(",")
+        if not isinstance(tags, list):
+            raise ApiError(400, "tags must be a list or a comma-separated string")
+        clean = sorted({str(t).strip()[:30] for t in tags if str(t).strip()},
+                       key=str.lower)[:20]
+        if clean:
+            sets.append("#tags = :t")
+            values[":t"] = clean
+        else:
+            removes.append("#tags")
+    if not sets and not removes:
+        raise ApiError(400, "nothing to update: send genre, priority and/or tags")
+    sets.append("#meta_at = :now")
+    values[":now"] = int(time.time())
+    expr = "SET " + ", ".join(sets) + (" REMOVE " + ", ".join(removes) if removes else "")
+    item = ddb.update_item(
+        Key={"pk": f"USER#{user}", "sk": f"PROG#{pid}"},
+        UpdateExpression=expr, ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values, ReturnValues="ALL_NEW",
+    )["Attributes"]
+    meta = ddb.get_item(Key={"pk": f"PROB#{pid}", "sk": "META"},
+                        ProjectionExpression="#g, #f",  # `family` is a DDB reserved word
+                        ExpressionAttributeNames={"#g": "genre", "#f": "family"}).get("Item", {})
+    genre_corpus = meta.get("genre") or meta.get("family", "")
+    return {"pid": pid, "genre": item.get("genre") or genre_corpus,
+            "genre_corpus": genre_corpus, "priority": item.get("priority", 0),
+            "tags": list(item.get("tags") or [])}
 
 
 # ---------------------------------------------------------------- judging
 def _submit(user: str, body: dict) -> dict:
-    prob = body.get("prob", "")
+    pid = body.get("pid") or body.get("prob") or ""
     code = body.get("code", "")
     mode = body.get("mode", "submit")
     if mode not in ("run", "submit"):
         raise ApiError(400, "mode must be run|submit")
-    if not code.strip():
+    if not isinstance(code, str) or not code.strip():
         raise ApiError(400, "empty submission")
     if len(code) > MAX_CODE:
         raise ApiError(400, f"submission over {MAX_CODE // 1000}KB")
-    if not ddb.get_item(Key={"pk": f"PROB#{prob}", "sk": "META"}).get("Item"):
-        raise ApiError(404, f"unknown problem {prob}")
+    if not ddb.get_item(Key={"pk": f"PROB#{pid}", "sk": "META"},
+                        ProjectionExpression="pk").get("Item"):
+        raise ApiError(404, f"unknown problem {pid}")
 
     now_ms = int(time.time() * 1000)
     sk = f"{now_ms:013d}#{secrets.token_hex(3)}"
     item = {
-        "pk": f"SUB#{prob}", "sk": sk, "user": user, "mode": mode,
+        "pk": f"SUB#{pid}", "sk": sk, "user": user, "mode": mode,
         "code": code, "verdict": "PENDING", "created": int(time.time()),
-        "gsi1pk": f"USER#{user}", "gsi1sk": sk, "prob": prob,
+        "gsi1pk": f"USER#{user}", "gsi1sk": sk, "prob": pid,
     }
     if mode == "run":
         item["expires"] = int(time.time()) + 3600  # DDB TTL sweeps practice runs
     ddb.put_item(Item=item)
     lam.invoke(FunctionName=JUDGE_FN, InvocationType="Event",
-               Payload=json.dumps({"prob": prob, "sub_sk": sk, "user": user,
+               Payload=json.dumps({"pid": pid, "sub_sk": sk, "user": user,
                                    "mode": mode, "code": code}).encode())
-    return {"prob": prob, "sk": sk}
+    return {"pid": pid, "sk": sk}
 
 
-def _poll(user: str, sess: dict, prob: str, sk: str) -> dict:
-    item = ddb.get_item(Key={"pk": f"SUB#{prob}", "sk": sk}).get("Item")
+def _poll(user: str, sess: dict, pid: str, sk: str) -> dict:
+    item = ddb.get_item(Key={"pk": f"SUB#{pid}", "sk": sk}).get("Item")
     if not item or item.get("user") != user:
         raise ApiError(404, "no such submission")
     out = {k: item.get(k) for k in
            ("sk", "verdict", "passed", "total", "ms", "detail", "stdout_tail",
             "trace", "mode", "created")}
-    out["prob"] = prob
+    out["pid"] = pid
     try:
         out["cases"] = json.loads(item.get("cases_json") or "[]")
     except ValueError:
         out["cases"] = []
     if item.get("verdict") == "AC" and item.get("mode") == "submit":
-        out["sync"] = _sync_if_needed(user, sess, prob, sk, item["code"], item)
+        out["sync"] = _sync_if_needed(user, sess, pid, sk, item["code"], item)
     return out
 
 
 # ---------------------------------------------------------------- github sync
-def _sync_if_needed(user: str, sess: dict, prob: str, sk: str,
+def _sync_if_needed(user: str, sess: dict, pid: str, sk: str,
                     code: str, sub: dict) -> dict:
-    prog = ddb.get_item(Key={"pk": f"USER#{user}", "sk": f"PROG#{prob}"}).get("Item", {})
+    prog = ddb.get_item(Key={"pk": f"USER#{user}", "sk": f"PROG#{pid}"}).get("Item", {})
     if prog.get("ac_sub") != sk:
         return {"state": "superseded"}
     if prog.get("synced_sub") == sk:
@@ -362,13 +554,14 @@ def _sync_if_needed(user: str, sess: dict, prob: str, sk: str,
 
     token = _param("sync-pat", required=False) or sess.get("gh")
     if not token:
-        return {"state": "skipped", "why": "no GitHub token in session"}
+        return {"state": "skipped", "why": "no GitHub token in session — sign in again "
+                                           "or set /mogi/sync-pat"}
     repo = _param("sync-repo")
-    meta = ddb.get_item(Key={"pk": f"PROB#{prob}", "sk": "META"},
+    meta = ddb.get_item(Key={"pk": f"PROB#{pid}", "sk": "META"},
                         ProjectionExpression="title, corpus, slug, link").get("Item", {})
-    slug = meta.get("slug", prob)
+    slug = meta.get("slug", pid.replace("/", "_"))
     path = f"{meta.get('corpus', 'misc')}/{slug}.py"
-    header = (f"# {prob} — {meta.get('title', '')}\n"
+    header = (f"# {pid} — {meta.get('title', '')}\n"
               f"# AC {sub.get('passed')}/{sub.get('total')} checks · "
               f"{sub.get('ms')} ms · judged by mogi\n"
               f"# Problem source: {meta.get('link', '')}\n\n")
@@ -377,7 +570,7 @@ def _sync_if_needed(user: str, sess: dict, prob: str, sk: str,
     url = f"https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(path)}"
     auth = {"Authorization": f"Bearer {token}"}
     status, existing = _http(url, headers=auth)
-    payload = {"message": f"AC {prob} — {meta.get('title', '')} "
+    payload = {"message": f"AC {pid} — {meta.get('title', '')} "
                           f"({sub.get('passed')}/{sub.get('total')} checks, {sub.get('ms')} ms)",
                "content": content}
     if status == 200 and existing.get("sha"):
@@ -387,7 +580,7 @@ def _sync_if_needed(user: str, sess: dict, prob: str, sk: str,
         return {"state": "error",
                 "why": f"GitHub {status}: {put.get('message', 'unknown')}"}
     ddb.update_item(
-        Key={"pk": f"USER#{user}", "sk": f"PROG#{prob}"},
+        Key={"pk": f"USER#{user}", "sk": f"PROG#{pid}"},
         UpdateExpression="SET synced_sub=:sk, synced_path=:p, synced_at=:t",
         ExpressionAttributeValues={":sk": sk, ":p": path, ":t": int(time.time())},
     )
@@ -406,5 +599,5 @@ def _activity(user: str) -> dict:
         ExpressionAttributeNames={"#md": "mode"},
     )["Items"]
     return {"events": [{"ts": int(i["gsi1sk"].split("#")[0]), "verdict": i.get("verdict"),
-                        "prob": i.get("prob"), "mode": i.get("mode"), "ms": i.get("ms")}
+                        "pid": i.get("prob"), "mode": i.get("mode"), "ms": i.get("ms")}
                        for i in items]}

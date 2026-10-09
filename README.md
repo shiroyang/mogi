@@ -2,8 +2,10 @@
 
 A single-user online judge for a local corpus of interview problems, built on AWS
 serverless (CloudFront + S3 + API Gateway + two Lambdas + DynamoDB). Write code in
-the browser, get an AC/WA/RE/TLE/CE verdict in about a second, track progress, and
-have every accepted solution committed to a GitHub repo automatically.
+the browser, in **VS Code**, or in any editor via the **`mogi` CLI**; get an
+AC/WA/RE/TLE/CE verdict in about a second; track progress by **genre** and
+**importance**; and have every accepted solution committed to a GitHub repo
+automatically.
 
 Idle cost is effectively zero — there is no always-on compute anywhere in the stack.
 
@@ -31,20 +33,23 @@ that unlocks after your first AC.
 
 ```
 browser ──► CloudFront ──► S3 (static UI: Monaco editor, dashboard, heatmap)
-               │
-               └─ /api/* ──► HTTP API ──► api Lambda ──► DynamoDB (1 table)
-                                             │   ▲
-                                   async invoke   │ verdict
-                                             ▼    │
-                                          judge Lambda ──► subprocess sandbox
+VS Code ─┐     │
+CLI ─────┴─ /api/* ──► HTTP API ──► api Lambda ──► DynamoDB (1 table)
+   (Bearer token)                        │   ▲
+                               async invoke   │ verdict
+                                         ▼    │
+                                      judge Lambda ──► subprocess sandbox
 ```
 
 - **Auth** — GitHub OAuth with a one-login allowlist; the session is a stateless
-  HS256 JWT in an HttpOnly cookie. No Cognito, no user pool, no passwords.
+  HS256 JWT in an HttpOnly cookie. The CLI and the VS Code extension hold the same
+  kind of JWT as a long-lived Bearer token, obtained once through a browser hand-off
+  (`/api/auth/cli` → `http://127.0.0.1:<port>/callback#token=…`; the token travels
+  in the URL fragment so it never reaches a server log). No Cognito, no passwords.
 - **Sandbox** — submissions run in a subprocess with a scrubbed environment (no
   AWS credentials are visible to submitted code), `python -I`, rlimits on
   memory/CPU/file size, and a wall-clock timeout. Verdicts: AC · WA (with the
-  failing check's `got X want Y`) · RE · TLE · CE.
+  failing check's `got X want Y`) · RE · TLE · CE, each with "your code line N".
 - **GitHub sync** — on an accepted submission the API commits the solution to a
   configured repo via the Contents API. By default it uses the OAuth token from
   login; set the `/mogi/sync-pat` SSM parameter to a fine-grained PAT
@@ -55,6 +60,70 @@ browser ──► CloudFront ──► S3 (static UI: Monaco editor, dashboard, 
 - **Spoiler discipline** — problem statements are split at ingest: the published
   statement and examples are always visible; the approach/complexity/hand-trace
   analysis, the reference implementation, and the test source unlock after AC.
+- **Problem ids are corpus-qualified** — `Amazon/A16`, `Google/C07`. The two
+  corpora reuse bare ids (`C07` exists in both), and an earlier ingest silently let
+  one overwrite the other. Every route, URL and local directory now carries the
+  corpus; a bare id still works wherever it is unambiguous (`mogi open A16`).
+
+## Genre, frequency, importance — and your own categorisation
+
+Every problem carries metadata derived at ingest from the corpus front matter and
+the corpus README, so the dashboard, the CLI and the VS Code tree can all sort and
+group the same way:
+
+| Field | Where it comes from |
+|---|---|
+| **genre** | the README's "Index by family" table (20 genres per corpus); falls back to the front-matter `Family` row |
+| **freq** `2× · 11` | publications of this exact problem (Source + Alt source + † republished twin) · problems sharing the genre in the corpus |
+| **rank** `#1…#7` | the Amazon README's "Start here" ranked shapes (the eleven Specification/Filter problems are rank 1) |
+| **confidence** | ⭐ count in the front matter — how verbatim the published statement is |
+| **importance** 0–100 | `45…15` for ranks 1–7 + `2 × min(genre size, 12)` + `8 × min(extra publications, 2)` + `4 × confidence` + `6 if Tier A` |
+
+The dashboard has a **Sort** control (importance · frequency · genre · tier ·
+recently worked · attempts · id — or click a column header), a **group by genre**
+toggle with collapsible sections, a genre filter, and a **▶ Pick one** button that
+opens the most important unsolved problem in the current filter.
+
+The **✎ categorise** button on every row (and in the problem page header) opens a
+popover where you set your own **genre** (override the corpus genre, or invent a
+new one), **0–5 priority stars** and free-form **tags**. Stars outrank the computed
+importance everywhere — a starred problem always sorts above an unstarred one — so
+"what should I do next" is one click. The corpus genre is kept, so a reset is one
+click too. The same data is editable from `mogi tag` and from the VS Code tree's
+context menu.
+
+## Solve from VS Code
+
+```bash
+cd vscode && npm install && npm run package && code --install-extension mogi-0.1.0.vsix
+```
+
+Then click the ⚖ **mogi** icon in the activity bar → *Sign in with GitHub* (one
+browser round-trip; the token is shared with the CLI). The tree is grouped by genre
+and sorted by importance (change either from the view title). Clicking a problem
+creates `~/mogi/<Corpus>/<slug>/solution.py` (from the stub, or from your accepted
+solution) and opens the statement panel beside it. **Alt+R** runs the problem's
+tests, **Alt+S** submits; the verdict renders LeetCode-style in the panel and the
+failing line gets a red squiggle in the editor. Right-click → priority ★ / genre /
+tags. **Alt+O** searches. See [`vscode/README.md`](vscode/README.md).
+
+## Solve from the terminal (any editor)
+
+```bash
+python3 -m pip install --user -e cli        # → ~/.local/bin/mogi
+mogi login                                  # browser hand-off, token → ~/.config/mogi/config.json
+mogi ls --sort importance -n 20             # or --genre graph --status fresh --tag redo --json
+mogi open A16 --code                        # ~/mogi/Amazon/A16_…/{problem.md, solution.py}; opens VS Code
+mogi run                                    # in that directory: the problem's own tests, does not count
+mogi submit                                 # counts: AC unlocks spoilers and syncs to GitHub
+mogi tag A16 --priority 5 --add-tag redo    # categorise; --genre graph / --reset-genre
+mogi pick --genre allocation --open         # the most important unsolved one
+mogi stats · mogi web A16 · mogi whoami
+```
+
+Exit codes: 0 = AC, 1 = any other verdict, 2 = error — so `mogi run && git commit`
+style chaining works. `mogi run` / `mogi submit` find the problem from the nearest
+`.mogi.json`, so they work from inside the problem directory, or take an id/path.
 
 ## Deploy
 
@@ -82,27 +151,36 @@ aws ssm put-parameter --name /mogi/github/client-secret --type SecureString --va
 ```
 
 Finally, ingest a corpus (any directory tree following the contract above —
-`<root>/<Corpus>/problems/*.md` + `<root>/<Corpus>/solutions/*.py`):
+`<root>/<Corpus>/problems/*.md` + `<root>/<Corpus>/solutions/*.py`, plus an
+optional `<root>/<Corpus>/README.md` with an "Index by family" table for genres):
 
 ```bash
-python3 tools/ingest.py /path/to/corpus --table mogi --region <region>
+python3 tools/ingest.py /path/to/corpus --table mogi --region <region> --prune-stale
+python3 tools/ingest.py /path/to/corpus --dry-run --show Amazon/A16   # parse + report only
 ```
 
 The ingester re-verifies every reference solution through the actual judge before
 uploading — if a problem's own reference can't get AC, nothing is written.
+`--prune-stale` removes problem rows that are no longer in the corpus (including
+the old bare-id rows); `tools/migrate_ids.py --apply` moves per-user progress and
+submission rows from bare ids to corpus-qualified ones.
 
 ## Verification
 
 `tools/corpus_sweep.py` submits every reference implementation to the judge as if
 it were user code and requires 250/250 AC, plus sabotage cases proving each
 verdict fires (wrong answer, crash, infinite loop, syntax error).
+`python3 -m unittest discover -s cli/tests` covers the CLI offline (rendering,
+workspace layout, id resolution, config); `cd vscode && npm run typecheck`.
 
 ## Layout
 
 ```
 backend/judge/   splitter.py (ast split, stub generation) · runner.py (sandbox) · handler.py
-backend/api/     handler.py (routes, OAuth, JWT, GitHub sync — stdlib + boto3 only)
-web/             index.html (dashboard + heatmap) · problem.html (Monaco + verdicts) · css/js
+backend/api/     handler.py (routes, OAuth + Bearer, JWT, meta, GitHub sync — stdlib + boto3 only)
+web/             index.html (dashboard: sort/group/filter/categorise + heatmap) · problem.html (Monaco + verdicts) · css/js
+cli/             mogi_cli/ (stdlib-only `mogi` command) · tests/
+vscode/          the VS Code extension (TypeScript, esbuild-bundled, no runtime deps)
 infra/           app.py (CDK, one stack)
-tools/           ingest.py · corpus_sweep.py
+tools/           ingest.py · migrate_ids.py · corpus_sweep.py
 ```

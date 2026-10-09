@@ -11,7 +11,9 @@
 <body>
 <header>
   <div class="logo"><a href="/">mogi</a> <span id="crumb"></span></div>
+  <div class="pmeta" id="pmeta"></div>
   <div class="spacer"></div>
+  <a class="stat nextlink" id="nextLink" style="display:none" title="the most important unsolved problem — same genre first"></a>
   <div class="stat" id="pstate"></div>
 </header>
 
@@ -25,13 +27,14 @@
       <button data-tab="tests" id="testsBtn" style="display:none">Tests 🔓</button>
     </div>
     <div class="body">
-      <div id="statement" class="statement tab"></div>
+      <div id="statement" class="statement tab"><div id="plinks"></div><div id="stmt"></div></div>
       <div id="apiTab" class="tab" style="display:none">
         <p class="stat">The tests call these top-level names — your submission must define them.
           Your own <code>if __name__ == "__main__":</code> block is stripped before judging,
           so scratch tests there are safe.</p>
         <div id="required"></div>
-        <p><button class="btn" id="loadStub">Load starter stub into editor</button></p>
+        <p><button class="btn" id="loadStub">Load starter stub into editor</button>
+           <button class="btn" id="loadAC" style="display:none">Load my accepted solution</button></p>
         <pre id="stubView" class="mono" style="font-size:.85rem"></pre>
       </div>
       <div id="analysis" class="statement tab" style="display:none"></div>
@@ -45,8 +48,8 @@
   <div class="pane">
     <div id="editor"></div>
     <div class="toolbar">
-      <button class="btn" id="runBtn">▶ Run tests</button>
-      <button class="btn primary" id="submitBtn">Submit</button>
+      <button class="btn" id="runBtn">▶ Run tests <kbd id="runKey"></kbd></button>
+      <button class="btn primary" id="submitBtn">Submit <kbd id="submitKey"></kbd></button>
       <span class="stat" id="busy"></span>
       <div class="spacer" style="flex:1"></div>
       <span class="stat">draft autosaves locally</span>
@@ -62,19 +65,21 @@
 <script src="/mogi.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.49.0/min/vs/loader.js"></script>
 <script>
-const PROB = new URLSearchParams(location.search).get("id");
-const DRAFT_KEY = "mogi-draft-" + PROB;
-let editor, P;
+const RAW_ID = new URLSearchParams(location.search).get("id") || "";
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+let PROB = RAW_ID, DRAFT_KEY = "", editor, P, GENRES = [];
 
 require.config({ paths: { vs: "https://cdn.jsdelivr.net/npm/monaco-editor@0.49.0/min/vs" } });
 require(["vs/editor/editor.main"], () => {
   editor = monaco.editor.create(document.getElementById("editor"), {
-    value: localStorage.getItem(DRAFT_KEY) || "",
-    language: "python", theme: "vs-dark", automaticLayout: true,
+    value: "", language: "python", theme: "vs-dark", automaticLayout: true,
     fontSize: 13.5, minimap: { enabled: false }, scrollBeyondLastLine: false,
   });
-  editor.onDidChangeModelContent(() =>
-    localStorage.setItem(DRAFT_KEY, editor.getValue()));
+  // LeetCode-style shortcuts: ⌘↩ runs, ⇧⌘↩ submits (Ctrl on other platforms)
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => judge("run"));
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, () => judge("submit"));
+  runKey.textContent = IS_MAC ? "⌘↩" : "Ctrl+↩";
+  submitKey.textContent = IS_MAC ? "⇧⌘↩" : "Ctrl+Shift+↩";
   main().catch(e => { if (e.message !== "not signed in") alert(e); });
 });
 
@@ -164,15 +169,83 @@ function unlockSpoilers(p) {
     const el = document.getElementById(div);
     if (md) el.innerHTML = marked.parse(text); else el.textContent = text;
   }
+  if (p.ac_code) {
+    loadAC.style.display = "";
+    loadAC.onclick = () => {
+      if (!editor.getValue().trim() || confirm("Replace the editor contents with your accepted solution?"))
+        editor.setValue(p.ac_code);
+    };
+  }
+}
+
+// header: genre chip · ★ priority · importance · tags · ✎ — all editable in place
+function renderMeta() {
+  pmeta.innerHTML =
+    `<button class="chip genre" id="genreChip" title="genre — click to categorise">${esc(P.genre || "—")}</button>` +
+    `<span id="pstars">${starsHTML(P.priority || 0)}</span> ${impHTML(P)} ${tagsHTML(P.tags)}` +
+    `<button class="editbtn" id="editMeta" title="categorise: genre · priority · tags">✎</button>`;
+  const onSaved = res => {
+    Object.assign(P, { genre: res.genre, genre_corpus: res.genre_corpus, priority: res.priority, tags: res.tags });
+    if (res.genre && !GENRES.includes(res.genre)) GENRES = [...GENRES, res.genre].sort();
+    renderMeta();
+  };
+  genreChip.onclick = editMeta.onclick = (e) => openMetaEditor(e.target, P, GENRES, onSaved);
+  bindStars(document.getElementById("pstars"), P.priority || 0,
+    async k => { try { onSaved(await saveMeta(P.pid, { priority: k })); } catch (e) { alert(e.message); } });
+}
+
+function renderLinks() {
+  const bits = [];
+  if (P.link) bits.push(`<a href="${esc(P.link)}" target="_blank" rel="noopener">source ↗</a>`);
+  if (P.alt_link) bits.push(`<a href="${esc(P.alt_link)}" target="_blank" rel="noopener">alt source ↗</a>`);
+  const pr = P.practice || {};
+  if (pr.url)
+    bits.push(`<a href="${esc(pr.url)}" target="_blank" rel="noopener" title="${esc(pr.note || "")}">practice: ${esc(pr.label)} ${"⭐".repeat(pr.stars || 0)} ↗</a>`);
+  else if (pr.note)
+    bits.push(`<span title="${esc(pr.note)}">no judge hosts this one</span>`);
+  bits.push(`${esc(P.corpus)} · Tier ${esc(P.tier)}${P.round ? " · " + esc(P.round) : ""}${P.published ? " · " + esc(P.published) : ""}`);
+  bits.push(`seen ${P.pubs || 1}× · ${P.family_n || 0} in genre`);
+  plinks.innerHTML = bits.join(" <span class=\"dim\">·</span> ");
+}
+
+// Old bookmarks carry a bare id (`?id=B01`); resolve it through the list.
+async function resolvePid(raw) {
+  if (!raw) throw new Error("no problem id in the URL");
+  if (raw.includes("/")) return raw;
+  const { problems } = await api("/problems");
+  const hits = problems.filter(p => p.id.toLowerCase() === raw.toLowerCase());
+  if (hits.length === 1) { location.replace(pidURL(hits[0].pid)); return null; }
+  throw new Error(hits.length ? `ambiguous id ${raw}: ${hits.map(h => h.pid).join(", ")}` : `unknown problem ${raw}`);
 }
 
 async function main() {
-  P = await api("/problems/" + encodeURIComponent(PROB));
+  const pid = await resolvePid(RAW_ID);
+  if (!pid) return;
+  PROB = pid;
+  DRAFT_KEY = "mogi-draft-" + PROB;
+  const legacy = "mogi-draft-" + PROB.split("/")[1];
+  if (!localStorage.getItem(DRAFT_KEY) && localStorage.getItem(legacy)) {
+    localStorage.setItem(DRAFT_KEY, localStorage.getItem(legacy));
+    localStorage.removeItem(legacy);
+  }
+  editor.setValue(localStorage.getItem(DRAFT_KEY) || "");
+  editor.onDidChangeModelContent(() => localStorage.setItem(DRAFT_KEY, editor.getValue()));
+
+  P = await api(apiPath(PROB));
+  GENRES = P.genres || [];
   document.title = `mogi — ${P.id}`;
   crumb.textContent = ` › ${P.id} — ${P.title}`;
   pstate.innerHTML = P.solved ? '<span class="v-AC">SOLVED</span>'
     : P.status === "attempted" ? '<span class="v-RE">attempted</span>' : "";
-  document.getElementById("statement").innerHTML = marked.parse(P.statement || "");
+  if (P.next) {
+    nextLink.href = pidURL(P.next.pid);
+    nextLink.textContent = `next${P.next.same_genre ? " in genre" : ""}: ${P.next.id} →`;
+    nextLink.title = P.next.title;
+    nextLink.style.display = "";
+  }
+  renderMeta();
+  renderLinks();
+  document.getElementById("stmt").innerHTML = marked.parse(P.statement || "");
   document.getElementById("required").innerHTML =
     (P.required || []).map(r => `<span class="chip mono">${esc(r)}</span> `).join("");
   document.getElementById("stubView").textContent = P.stub || "";
@@ -188,6 +261,7 @@ async function main() {
 }
 
 async function judge(mode) {
+  if (!P) return;
   const code = editor.getValue();
   if (!code.trim()) return;
   runBtn.disabled = submitBtn.disabled = true;
@@ -196,11 +270,11 @@ async function judge(mode) {
   v.style.display = ""; v.className = "verdict PENDING";
   v.textContent = "PENDING — running the problem's tests against your code…";
   try {
-    const { prob, sk } = await api("/submit",
-      { method: "POST", body: JSON.stringify({ prob: PROB, code, mode }) });
-    for (let i = 0; i < 40; i++) {
+    const { pid, sk } = await api("/submit",
+      { method: "POST", body: JSON.stringify({ pid: PROB, code, mode }) });
+    for (let i = 0; i < 82; i++) {  // ≈ 118 s — covers the longest per-problem time limit (110 s)
       await new Promise(r => setTimeout(r, i < 6 ? 700 : 1500));
-      const s = await api(`/submissions/${prob}/${encodeURIComponent(sk)}`);
+      const s = await api(`/submissions/${pid}/${encodeURIComponent(sk)}`);
       if (s.verdict !== "PENDING") { showVerdict(s, mode); return; }
     }
     v.textContent = "still judging — check the submissions list in a moment";
@@ -257,8 +331,8 @@ function showVerdict(s, mode) {
   }
   if (s.sync && s.sync.state === "done")
     h += `<div class="iolabel" style="color:var(--green)">↑ synced to GitHub: ${esc(s.sync.path)}</div>`;
-  if (s.sync && s.sync.state === "error")
-    h += `<div class="iolabel" style="color:var(--red)">⚠ GitHub sync failed: ${esc(s.sync.why)}</div>`;
+  if (s.sync && (s.sync.state === "error" || s.sync.state === "skipped"))
+    h += `<div class="iolabel" style="color:var(--red)">⚠ GitHub sync ${esc(s.sync.state)}: ${esc(s.sync.why)}</div>`;
   v.innerHTML = h;
 
   const detail = document.getElementById("caseDetail");
@@ -276,8 +350,7 @@ function showVerdict(s, mode) {
 
   if (mode === "submit" && s.verdict === "AC" && !P.solved)
     setTimeout(() => location.reload(), 1600); // unlock analysis/reference tabs
-  api("/problems/" + encodeURIComponent(PROB))
-    .then(p => renderSubs(p.submissions)).catch(() => {});
+  api(apiPath(PROB)).then(p => renderSubs(p.submissions)).catch(() => {});
 }
 
 runBtn.onclick = () => judge("run");
