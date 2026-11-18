@@ -9,3 +9,5 @@ vscode/dist/
 *.vsix
 web/node_modules/
 web/dist/
+# The Classics selection belongs to a corpus, not to this repo.
+tools/classics.json

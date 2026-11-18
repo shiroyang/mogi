@@ -5,9 +5,9 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { api, AuthError, problemHref, vscodeHref, type MetaResult, type Problem } from "../api";
 import { Categorise, type MetaTarget } from "../components/Categorise";
 import { Sheet } from "../components/Sheet";
-import { Importance, Stars, toast, TopBar } from "../components/ui";
+import { Difficulty, Importance, Minutes, Stars, toast, TopBar } from "../components/ui";
 import { useAsync, useIsMobile, useLocalStorage } from "../hooks";
-import { applyFilters, DEFAULT_FILTERS, groupByGenre, pickBest, resolveId, SORT_LABELS, type Filters, type SortBy } from "../model";
+import { applyFilters, DEFAULT_FILTERS, DIFFICULTIES, groupByGenre, pickBest, redoState, redoText, resolveId, rowStatus, SORT_LABELS, type Filters, type SortBy } from "../model";
 import { Login } from "./Login";
 
 export function Problems() {
@@ -40,7 +40,7 @@ export function Problems() {
   if (error instanceof AuthError) return <Login />;
 
   const set = (patch: Partial<Filters>) => setF(p => ({ ...p, ...patch }));
-  const active = [f.corpus, f.status, f.tier].filter(Boolean).length + (f.group ? 1 : 0);
+  const active = [f.corpus, f.status, f.tier, f.difficulty].filter(Boolean).length + (f.group ? 1 : 0);
   const patchRow = (pid: string, res: Partial<Problem>) =>
     setData(d => ({ ...d, problems: d.problems.map(p => (p.pid === pid ? { ...p, ...res } : p)),
                     genres: [...new Set([...d.genres, ...(res.genre ? [res.genre] : [])])].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())) }));
@@ -52,22 +52,28 @@ export function Problems() {
   const onSaved = (res: MetaResult) => patchRow(res.pid, { genre: res.genre, genre_corpus: res.genre_corpus, priority: res.priority, tags: res.tags });
   const pick = () => {
     const best = pickBest(rows);
-    if (best) nav(problemHref(best.pid)); else toast("Everything in this filter is solved 🎉");
+    if (best) nav(problemHref(best.pid)); else toast("Nothing left to start in this filter");
   };
 
   const Row = ({ p }: { p: Problem }) => (
     <li className="prow">
       <Link to={problemHref(p.pid)} className="prow-main">
-        <span className={`dot ${p.status}`} />
+        <span className={`dot ${rowStatus(p)}`} />
         <span className="pid">{p.id}</span>
         <span className="ptitle">{p.title}</span>
       </Link>
       <div className="pmeta">
         <button type="button" className={`chip genre ${f.genre === p.genre ? "on" : ""}`} title="filter by this genre"
           onClick={() => set({ genre: f.genre === p.genre ? "" : p.genre })}>{p.genre || "—"}</button>
+        <Difficulty value={p.difficulty} src={p.difficulty_src} />
+        <Minutes value={p.minutes} loc={p.loc} />
         <Importance value={p.importance} rank={p.rank} />
         <span className="faint freq" title={`seen in ${p.pubs} publication(s) · ${p.family_n} problems share the genre`}>{p.pubs}× · {p.family_n}</span>
         <span className="faint corpus">{p.corpus} · {p.tier}{p.attempts ? ` · ${p.attempts} att.` : ""}</span>
+        {p.redo_at && (
+          <span className={`chip redo${redoState(p.redo_at) === "due" ? " due" : ""}`}
+            title="You read the solution. It comes back so you can write it again from a blank editor.">{redoText(p.redo_at)}</span>
+        )}
         {p.tags.map(t => <span key={t} className="chip tag">{t}</span>)}
       </div>
       <div className="pact">
@@ -131,6 +137,11 @@ export function Problems() {
           <label>Status</label>
           <select className="field" value={f.status} onChange={e => set({ status: e.target.value })}>
             <option value="">Any status</option><option value="solved">Solved</option><option value="attempted">Attempted</option><option value="fresh">Untouched</option>
+            <option value="redo">Waiting for a redo</option>
+          </select>
+          <label>Difficulty</label>
+          <select className="field" value={f.difficulty} onChange={e => set({ difficulty: e.target.value })}>
+            <option value="">Any difficulty</option>{DIFFICULTIES.map(d => <option key={d}>{d}</option>)}
           </select>
           <label>Tier</label>
           <select className="field" value={f.tier} onChange={e => set({ tier: e.target.value })}>
@@ -139,7 +150,7 @@ export function Problems() {
           <label className="toggle" style={{ marginTop: 16 }}><input type="checkbox" checked={f.group} onChange={e => set({ group: e.target.checked })} /> Group by genre</label>
           <div className="row" style={{ marginTop: 18 }}>
             <button type="button" className="btn primary" onClick={() => setFiltersOpen(false)}>Done</button>
-            <button type="button" className="btn" onClick={() => set({ corpus: "", status: "", tier: "", genre: "", q: "", group: false })}>Reset</button>
+            <button type="button" className="btn" onClick={() => set({ corpus: "", status: "", tier: "", difficulty: "", genre: "", q: "", group: false })}>Reset</button>
           </div>
         </div>
       </Sheet>

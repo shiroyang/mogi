@@ -40,6 +40,30 @@ const highlight = HighlightStyle.define([
   { tag: t.propertyName, color: "#dbe6f0" },
 ]);
 
+// A read-only view sizes itself to the code instead of filling a pane.
+const viewTheme = EditorView.theme({
+  "&": { height: "auto", backgroundColor: "rgba(0, 0, 0, .28)", border: "1px solid var(--line)", borderRadius: "var(--r-sm)" },
+  ".cm-scroller": { overflow: "auto" },
+  ".cm-content": { padding: "8px 0" },
+});
+
+/** Read-only code in the editor's colours: the reference solution, the tests. */
+export function CodeView({ code }: { code: string }) {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const view = new EditorView({
+      parent: host.current!,
+      state: EditorState.create({
+        doc: code,
+        extensions: [lineNumbers(), python(), syntaxHighlighting(highlight), theme, viewTheme,
+                     EditorState.readOnly.of(true), EditorView.editable.of(false)],
+      }),
+    });
+    return () => view.destroy();
+  }, [code]);
+  return <div ref={host} className="codeview" />;
+}
+
 export const Editor = forwardRef<EditorHandle, Props>(function Editor({ initial, onChange, onRun, onSubmit, className }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);

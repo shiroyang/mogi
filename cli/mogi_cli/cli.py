@@ -1,7 +1,7 @@
 """mogi — command-line client for the 真題 online judge.
 
     mogi login                      sign in once (browser hand-off; token saved locally)
-    mogi ls [--genre G] [--sort importance|frequency|…] [--status fresh]
+    mogi ls [--genre G] [--difficulty easy] [--sort importance|easiest|…] [--status fresh]
     mogi open A16 [--code]          materialise ~/mogi/Amazon/A16_…/{problem.md,solution.py}
     mogi run   [ID|PATH]            judge solution.py against the problem's own tests
     mogi submit [ID|PATH]           same, but counts — AC unlocks spoilers and syncs to GitHub
@@ -26,8 +26,17 @@ from pathlib import Path
 from . import __version__, config, render, workspace
 from .api import Api, ApiError
 
+DIFFICULTY_RANK = {"Easy": 1, "Medium": 2, "Hard": 3}
+
+
+def _difficulty(p: dict) -> int:
+    return DIFFICULTY_RANK.get(p.get("difficulty") or "", 9)
+
+
 SORTS = {
     "importance": lambda p: (-rank_score(p), p["pid"]),
+    "easiest": lambda p: (_difficulty(p), p.get("minutes") or 99, -rank_score(p), p["pid"]),
+    "shortest": lambda p: (p.get("minutes") or 99, _difficulty(p), -rank_score(p), p["pid"]),
     "frequency": lambda p: (-(p.get("pubs") or 0), -(p.get("family_n") or 0), -rank_score(p)),
     "genre": lambda p: ((p.get("genre") or "").lower(), -rank_score(p)),
     "tier": lambda p: (p.get("tier") or "", -rank_score(p)),
@@ -146,10 +155,14 @@ def _filter(ctx: Ctx, rows: list[dict]) -> list[dict]:
             continue
         if getattr(a, "tag", None) and a.tag not in (p.get("tags") or []):
             continue
+        if getattr(a, "difficulty", None) and (p.get("difficulty") or "").lower() != a.difficulty.lower():
+            continue
         st = getattr(a, "status", None)
-        if st == "fresh" and p.get("status"):
+        if st == "fresh" and (p.get("status") or p.get("redo_at")):
             continue
         if st in ("solved", "attempted") and p.get("status") != st:
+            continue
+        if st == "redo" and not p.get("redo_at"):
             continue
         if q and q not in f"{p['id']} {p['title']} {p.get('genre', '')} {' '.join(p.get('tags') or [])}".lower():
             continue
@@ -171,18 +184,23 @@ def cmd_ls(ctx: Ctx) -> int:
         table_rows.append([
             render.status_glyph(p.get("status", ""), c),
             p["id"], p["title"], p["corpus"], p.get("tier") or "",
-            p.get("genre") or "", str(p.get("importance") or 0),
+            p.get("genre") or "", p.get("difficulty") or "", _minutes(p), str(p.get("importance") or 0),
             ("★" * int(p.get("priority") or 0)) or "",
             f"{p.get('pubs') or 1}×·{p.get('family_n') or 0}",
             " ".join(p.get("tags") or []),
         ])
-    print(render.table(["", "ID", "Title", "Corpus", "T", "Genre", "Imp", "★", "Freq", "Tags"],
-                       table_rows, [1, 5, 46, 6, 1, 22, 3, 5, 7, 20], c))
+    print(render.table(["", "ID", "Title", "Corpus", "T", "Genre", "Diff", "Min", "Imp", "★", "Freq", "Tags"],
+                       table_rows, [1, 5, 44, 6, 1, 20, 6, 3, 3, 5, 7, 18], c))
     solved = sum(1 for p in ctx.problems() if p.get("status") == "solved")
     more = f" (showing {len(rows)} of {total}; -n 0 for all)" if len(rows) < total else ""
     print(render.paint(f"\n{total} problems{more} · {solved}/{len(ctx.problems())} solved overall · "
                        f"sorted by {ctx.args.sort}", "dim", enabled=c))
     return 0
+
+
+def _minutes(p: dict) -> str:
+    m = p.get("minutes") or 0
+    return "" if not m else "60+" if m >= 60 else str(m)
 
 
 def cmd_open(ctx: Ctx) -> int:
@@ -268,15 +286,17 @@ def cmd_tag(ctx: Ctx) -> int:
 
 
 def cmd_pick(ctx: Ctx) -> int:
-    rows = [p for p in _filter(ctx, ctx.problems()) if p.get("status") != "solved"]
+    # not solved, and not resting before a redo (you read its solution; it comes back later)
+    rows = [p for p in _filter(ctx, ctx.problems()) if p.get("status") != "solved" and not p.get("redo_at")]
     if not rows:
         print("nothing unsolved matches — 🎉")
         return 0
     rows.sort(key=SORTS["importance"])
     pick = random.choice(rows[:5]) if ctx.args.random else rows[0]
     c = ctx.color
+    size = f" · {pick['difficulty']}, {_minutes(pick)} min" if pick.get("difficulty") and pick.get("minutes") else ""
     print(f"{render.paint(pick['id'], 'bold', enabled=c)} — {pick['title']}  "
-          f"[{pick['corpus']} · {pick.get('genre')} · importance {pick.get('importance')}"
+          f"[{pick['corpus']} · {pick.get('genre')}{size} · importance {pick.get('importance')}"
           f"{' · ' + '★' * int(pick['priority']) if pick.get('priority') else ''}]")
     if ctx.args.open:
         ctx.args.id = pick["pid"]
@@ -355,7 +375,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--corpus", help="Amazon | Google")
         p.add_argument("--genre", help="exact genre name (see `mogi stats`)")
         p.add_argument("--tier", help="A (design) | B (algorithm)")
-        p.add_argument("--status", choices=["solved", "attempted", "fresh"])
+        p.add_argument("--status", choices=["solved", "attempted", "fresh", "redo"],
+                       help="redo = you read the solution and it is waiting to be written again")
+        p.add_argument("--difficulty", choices=["easy", "medium", "hard"])
         p.add_argument("--tag", help="only problems carrying this tag")
         p.add_argument("-q", "--search", help="substring of id / title / genre / tags")
 

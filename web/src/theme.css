@@ -98,6 +98,14 @@ select.field { appearance: none; -webkit-appearance: none; padding-right: 30px;
 .chip.rank { color: var(--warn); border-color: rgba(240, 181, 69, .4); }
 .chip.ok { color: var(--ok); border-color: rgba(63, 214, 143, .4); }
 .chip.bad { color: var(--bad); border-color: rgba(255, 123, 114, .4); }
+.chip.diff { font-weight: 600; }
+.chip.diff.easy { color: var(--ok); border-color: rgba(63, 214, 143, .38); }
+.chip.diff.medium { color: var(--warn); border-color: rgba(240, 181, 69, .38); }
+.chip.diff.hard { color: var(--bad); border-color: rgba(255, 123, 114, .4); }
+.chip.diff.est { border-style: dashed; }  /* estimated: no LeetCode twin to borrow a rating from */
+.chip.redo { color: var(--tle); border-color: rgba(184, 163, 255, .45); }  /* violet = it comes back later */
+.chip.redo.due { background: rgba(184, 163, 255, .16); color: #d6c9ff; }
+.mins { font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 button.chip { cursor: pointer; } button.chip:hover { border-color: var(--line-strong); color: var(--ink); }
 .muted { color: var(--ink-2); } .faint { color: var(--ink-3); }
 .hairline { border: 0; border-top: 1px solid var(--line); margin: 0; }
@@ -115,6 +123,7 @@ button.chip { cursor: pointer; } button.chip:hover { border-color: var(--line-st
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: rgba(255, 255, 255, .12); flex: none; }
 .dot.solved { background: var(--ok); box-shadow: 0 0 10px rgba(63, 214, 143, .5); }
 .dot.attempted { background: var(--warn); }
+.dot.assisted { background: var(--tle); box-shadow: 0 0 10px rgba(184, 163, 255, .45); }
 
 /* ---- layout ---------------------------------------------------------- */
 .topbar {

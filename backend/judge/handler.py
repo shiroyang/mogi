@@ -18,6 +18,11 @@ TABLE = os.environ["TABLE"]
 ddb = boto3.resource("dynamodb").Table(TABLE)
 
 
+def _now() -> int:
+    """The clock for progress data. One place, so tests and the dev server can move it."""
+    return int(time.time())
+
+
 def lambda_handler(event, _ctx):
     prob_id = event.get("pid") or event["prob"]  # corpus-qualified, e.g. Amazon/A16
     sub_sk = event["sub_sk"]
@@ -40,12 +45,16 @@ def lambda_handler(event, _ctx):
     _finish(prob_id, sub_sk, result)
 
     if mode == "submit":
-        _update_progress(user, prob_id, sub_sk, result)
+        _update_progress(user, prob_id, sub_sk, result, event.get("elapsed_s"))
     else:  # a run is still "working on it" — the home page's Continue tile keys off last_at
+        # Run rows expire after an hour, so the count of runs is kept here.
         ddb.update_item(
             Key={"pk": f"USER#{user}", "sk": f"PROG#{prob_id}"},
-            UpdateExpression="SET last_at=:now, last_run_verdict=:v",
-            ExpressionAttributeValues={":now": int(time.time()), ":v": result["verdict"]},
+            UpdateExpression=("SET last_at=:now, last_run_verdict=:v, "
+                              "#runs=if_not_exists(#runs,:z)+:one"),
+            ExpressionAttributeNames={"#runs": "runs"},
+            ExpressionAttributeValues={":now": _now(), ":v": result["verdict"],
+                                       ":z": 0, ":one": 1},
         )
     return {"ok": True, "verdict": result["verdict"]}
 
@@ -71,18 +80,34 @@ def _finish(prob_id: str, sub_sk: str, r: dict):
     )
 
 
-def _update_progress(user: str, prob_id: str, sub_sk: str, r: dict):
-    now = int(time.time())
+def _update_progress(user: str, prob_id: str, sub_sk: str, r: dict, elapsed=None):
+    now = _now()
     if r["verdict"] == "AC":
-        ddb.update_item(
-            Key={"pk": f"USER#{user}", "sk": f"PROG#{prob_id}"},
-            UpdateExpression=("SET #st=:solved, attempts=if_not_exists(attempts,:z)+:one, "
-                              "last_at=:now, solved_at=if_not_exists(solved_at,:now), "
-                              "best_ms=:ms, ac_sub=:sk"),
-            ExpressionAttributeNames={"#st": "status"},
-            ExpressionAttributeValues={":solved": "solved", ":z": 0, ":one": 1,
-                                       ":now": now, ":ms": r["ms"], ":sk": sub_sk},
-        )
+        key = {"pk": f"USER#{user}", "sk": f"PROG#{prob_id}"}
+        sets = ["#st=:solved", "attempts=if_not_exists(attempts,:z)+:one", "last_at=:now",
+                "solved_at=if_not_exists(solved_at,:now)", "best_ms=:ms", "ac_sub=:sk"]
+        removes: list[str] = []
+        names = {"#st": "status"}
+        values = {":solved": "solved", ":z": 0, ":one": 1, ":now": now, ":ms": r["ms"], ":sk": sub_sk}
+        if elapsed is not None:
+            # how long the page's clock ran: kept for the first accepted solve, and for the latest
+            sets += ["#first=if_not_exists(#first,:el)", "#latest=:el"]
+            names.update({"#first": "solve_s", "#latest": "last_solve_s"})
+            values[":el"] = int(elapsed)
+        # A redo date is on the row when you read the solution, or rated the solve a struggle.
+        # An accepted submission on or after that date is the redo, written without the
+        # solution in view. It clears the date, and the rating, so the debrief asks again.
+        # An earlier one leaves everything in place.
+        redo_at = ddb.get_item(Key=key, ProjectionExpression="#redo",
+                               ExpressionAttributeNames={"#redo": "redo_at"}).get("Item", {}).get("redo_at")
+        if redo_at and redo_at <= now:
+            sets += ["#done=:now", "#redos=if_not_exists(#redos,:z)+:one"]   # redos: how many times you came back to it
+            removes += ["#redo", "#why", "#rating", "#rated"]
+            names.update({"#done": "redo_done_at", "#redos": "redos", "#redo": "redo_at", "#why": "redo_why",
+                          "#rating": "rating", "#rated": "rated_at"})
+        expr = "SET " + ", ".join(sets) + (" REMOVE " + ", ".join(removes) if removes else "")
+        ddb.update_item(Key=key, UpdateExpression=expr, ExpressionAttributeNames=names,
+                        ExpressionAttributeValues=values)
     else:
         ddb.update_item(
             Key={"pk": f"USER#{user}", "sk": f"PROG#{prob_id}"},

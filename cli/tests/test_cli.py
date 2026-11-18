@@ -174,6 +174,58 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(buf.getvalue().startswith("C07 — Merge intervals"))
 
 
+class SizedApi(FakeApi):
+    """Rows as the API sends them since the difficulty / time / redo fields were added."""
+    EXTRA = {"Amazon/A16": {"difficulty": "Medium", "minutes": 60},
+             "Amazon/C07": {"difficulty": "Medium", "minutes": 30, "redo_at": 1_900_000_000},
+             "Google/C07": {"difficulty": "Easy", "minutes": 15}}
+
+    def problems(self):
+        return {"problems": [{**r, **self.EXTRA[r["pid"]]} for r in ROWS]}
+
+
+class DifficultyTests(unittest.TestCase):
+    def run_cli(self, argv):
+        buf = io.StringIO()
+        ctx = ctx_for(argv, SizedApi())
+        with redirect_stdout(buf):
+            ctx.args.fn(ctx)
+        return buf.getvalue()
+
+    def test_ls_shows_difficulty_and_minutes(self):
+        out = self.run_cli(["ls", "-n", "0"])
+        self.assertIn("Diff", out.splitlines()[0])
+        row = next(ln for ln in out.splitlines() if "Design a Product Search System" in ln)
+        self.assertRegex(row, r"Medium\s+60\+\s+93")
+
+    def test_easiest_and_shortest_sorts(self):
+        first = lambda out: [ln for ln in out.splitlines() if ln.strip()][1]  # noqa: E731
+        self.assertIn("Count valid paths", first(self.run_cli(["ls", "-n", "0", "--sort", "easiest"])))
+        self.assertIn("Count valid paths", first(self.run_cli(["ls", "-n", "0", "--sort", "shortest"])))
+        self.assertIn("Merge intervals", first(self.run_cli(["ls", "-n", "0"])))   # stars still win by default
+
+    def test_difficulty_and_redo_filters(self):
+        out = self.run_cli(["ls", "-n", "0", "--difficulty", "easy"])
+        self.assertIn("Count valid paths", out)
+        self.assertNotIn("Merge intervals", out)
+        out = self.run_cli(["ls", "-n", "0", "--status", "redo"])
+        self.assertIn("Merge intervals", out)
+        self.assertNotIn("Design a Product Search System", out)
+
+    def test_pick_skips_a_problem_that_waits_for_its_redo(self):
+        # Amazon/C07 has five stars but its solution was read, so it rests until the redo
+        out = self.run_cli(["pick"])
+        self.assertTrue(out.startswith("A16 — Design a Product Search System"), out)
+        self.assertIn("Medium, 60+ min", out)
+
+    def test_rows_without_the_new_fields_still_list(self):
+        buf = io.StringIO()
+        ctx = ctx_for(["ls", "-n", "0", "--sort", "easiest"])
+        with redirect_stdout(buf):
+            ctx.args.fn(ctx)
+        self.assertIn("Merge intervals", buf.getvalue())
+
+
 class ConfigTests(unittest.TestCase):
     def test_roundtrip_and_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -3,7 +3,7 @@ import { marked } from "marked";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useSyncExternalStore, type ReactNode } from "react";
 import { Link } from "react-router";
-import { heatmapCells, IMPORTANCE_HELP } from "../model";
+import { DIFFICULTY_HELP, heatmapCells, IMPORTANCE_HELP, minutesHelp, minutesShort } from "../model";
 
 export function TopBar({ crumbs = [], title, right }: { crumbs?: { label: string; to?: string }[]; title?: ReactNode; right?: ReactNode }) {
   return (
@@ -38,6 +38,18 @@ export function Importance({ value, rank }: { value: number; rank?: number | nul
       {rank ? <span className="chip rank" title="shape rank in the Amazon README">#{rank}</span> : null}
     </span>
   );
+}
+
+/** Easy / Medium / Hard. A dashed outline means it was estimated, not borrowed from a LeetCode twin. */
+export function Difficulty({ value, src }: { value: string; src?: string }) {
+  if (!value) return null;
+  return <span className={`chip diff ${value.toLowerCase()}${src === "size" ? " est" : ""}`} title={DIFFICULTY_HELP[src || "twin"]}>{value}</span>;
+}
+
+/** A rough time for the problem: 15, 30, 45 or 60+ minutes. */
+export function Minutes({ value, loc }: { value: number; loc?: number }) {
+  if (!value) return null;
+  return <span className="faint mins" title={minutesHelp(loc || 0)}>{minutesShort(value)}</span>;
 }
 
 export function Heatmap({ events, weeks = 26, caption }: { events: { ts: number; verdict: string }[]; weeks?: number; caption?: string }) {

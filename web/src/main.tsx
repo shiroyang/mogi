@@ -9,6 +9,11 @@ import "./pages.css";
 // The editor chunk (CodeMirror) only loads when a problem is opened.
 const Problems = lazy(() => import("./pages/Problems").then(m => ({ default: m.Problems })));
 const Problem = lazy(() => import("./pages/Problem").then(m => ({ default: m.Problem })));
+const Review = lazy(() => import("./pages/Review").then(m => ({ default: m.Review })));
+const Mock = lazy(() => import("./pages/Mock").then(m => ({ default: m.Mock })));
+const Companion = lazy(() => import("./pages/Companion").then(m => ({ default: m.Companion })));
+// Every look of the companion on one page. Only in `npm run dev`: the build leaves it out.
+const Gallery = import.meta.env.DEV ? lazy(() => import("./pages/Gallery").then(m => ({ default: m.Gallery }))) : null;
 
 function Root() {
   return (
@@ -43,6 +48,11 @@ const router = createBrowserRouter([
       { path: "/", element: <Home /> },
       { path: "/problems", element: <Problems /> },
       { path: "/problem/:corpus/:id", element: <Problem /> },
+      { path: "/review", element: <Review /> },
+      { path: "/mock", element: <Mock /> },
+      { path: "/mock/:id", element: <Mock /> },
+      { path: "/companion", element: <Companion /> },
+      ...(Gallery ? [{ path: "/gallery", element: <Gallery /> }] : []),
       { path: "/problem.html", element: <LegacyProblem /> },
       { path: "/problems.html", element: <Navigate to="/problems" replace /> },
       { path: "/index.html", element: <Navigate to="/" replace /> },

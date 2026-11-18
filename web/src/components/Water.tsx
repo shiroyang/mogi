@@ -79,7 +79,10 @@ export function Water({ still = false }: { still?: boolean }) {
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      // Free what this effect made, but keep the context.
+      // In dev, React runs the effect twice on the same canvas, and a lost context cannot draw again.
+      gl.deleteProgram(prog);
+      gl.deleteBuffer(buf);
     };
   }, [still]);
   return <canvas ref={ref} className="water" aria-hidden="true" />;
